@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>QR Perks — Exclusive Offers for You | Ofertas Exclusivas</title>
+  <meta name="description" content="Exclusive deals on insurance, banking and phone plans. Scan to save. | Ofertas exclusivas en seguros, banco y planes de teléfono.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0A0A0A;
+      --surface: #141414;
+      --border: #222;
+      --accent: #F5C518;
+      --accent2: #FF4D4D;
+      --accent3: #00C896;
+      --text: #FFFFFF;
+      --text-sub: #999;
+      --font-display: 'Bebas Neue', sans-serif;
+      --font-body: 'Nunito', sans-serif;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--font-body);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    .lang-bar {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 8px 20px;
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
+    .lang-btn {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text-sub);
+      padding: 4px 12px;
+      border-radius: 100px;
+      font-family: var(--font-body);
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .lang-btn.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #000;
+    }
+
+    .hero {
+      padding: 40px 20px 32px;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: -100px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 400px;
+      height: 400px;
+      background: radial-gradient(circle, rgba(245,197,24,0.12) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .hero-badge {
+      display: inline-block;
+      background: var(--accent);
+      color: #000;
+      font-weight: 800;
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      padding: 5px 14px;
+      border-radius: 100px;
+      margin-bottom: 20px;
+      animation: fadeDown 0.5s ease both;
+    }
+
+    .hero-title {
+      font-family: var(--font-display);
+      font-size: clamp(52px, 14vw, 86px);
+      line-height: 0.95;
+      letter-spacing: 0.02em;
+      margin-bottom: 16px;
+      animation: fadeDown 0.5s 0.1s ease both;
+    }
+
+    .hero-title span { color: var(--accent); }
+
+    .hero-sub {
+      font-size: 16px;
+      color: var(--text-sub);
+      font-weight: 600;
+      margin-bottom: 32px;
+      line-height: 1.5;
+      animation: fadeDown 0.5s 0.2s ease both;
+    }
+
+    .hero-sub strong { color: var(--text); }
+
+    .offers {
+      padding: 0 16px 40px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      max-width: 480px;
+      margin: 0 auto;
+    }
+
+    .offer-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      overflow: hidden;
+      animation: fadeUp 0.5s ease both;
+    }
+
+    .offer-card:nth-child(1) { animation-delay: 0.15s; border-color: var(--accent2); }
+    .offer-card:nth-child(2) { animation-delay: 0.25s; border-color: var(--accent3); }
+    .offer-card:nth-child(3) { animation-delay: 0.35s; border-color: #4D9EFF; }
+
+    .offer-tag {
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      padding: 6px 14px;
+      display: block;
+    }
+
+    .offer-card:nth-child(1) .offer-tag { background: var(--accent2); color: #fff; }
+    .offer-card:nth-child(2) .offer-tag { background: var(--accent3); color: #000; }
+    .offer-card:nth-child(3) .offer-tag { background: #4D9EFF; color: #000; }
+
+    .offer-body { padding: 16px 20px 20px; }
+
+    .offer-icon { font-size: 36px; margin-bottom: 10px; display: block; }
+
+    .offer-title {
+      font-family: var(--font-display);
+      font-size: 28px;
+      letter-spacing: 0.03em;
+      line-height: 1;
+      margin-bottom: 6px;
+    }
+
+    .offer-desc {
+      font-size: 14px;
+      color: var(--text-sub);
+      font-weight: 600;
+      line-height: 1.5;
+      margin-bottom: 16px;
+    }
+
+    .offer-btn {
+      display: block;
+      width: 100%;
+      padding: 14px;
+      border-radius: 10px;
+      border: none;
+      font-family: var(--font-body);
+      font-weight: 800;
+      font-size: 15px;
+      cursor: pointer;
+      text-align: center;
+      text-decoration: none;
+      transition: transform 0.15s, opacity 0.15s;
+      letter-spacing: 0.02em;
+    }
+
+    .offer-btn:active { transform: scale(0.97); opacity: 0.9; }
+
+    .offer-card:nth-child(1) .offer-btn { background: var(--accent2); color: #fff; }
+    .offer-card:nth-child(2) .offer-btn { background: var(--accent3); color: #000; }
+    .offer-card:nth-child(3) .offer-btn { background: #4D9EFF; color: #000; }
+
+    .offer-disclaimer {
+      font-size: 11px;
+      color: var(--text-sub);
+      margin-top: 8px;
+      text-align: center;
+    }
+
+    .trust-bar {
+      display: flex;
+      justify-content: center;
+      gap: 24px;
+      padding: 24px 20px;
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      margin: 0 16px 32px;
+      flex-wrap: wrap;
+    }
+
+    .trust-item { text-align: center; }
+
+    .trust-num {
+      display: block;
+      font-family: var(--font-display);
+      font-size: 28px;
+      color: var(--accent);
+      letter-spacing: 0.03em;
+    }
+
+    .trust-label {
+      font-size: 11px;
+      color: var(--text-sub);
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .how {
+      padding: 0 20px 40px;
+      max-width: 480px;
+      margin: 0 auto;
+    }
+
+    .section-label {
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 16px;
+      display: block;
+    }
+
+    .how-title {
+      font-family: var(--font-display);
+      font-size: 36px;
+      letter-spacing: 0.03em;
+      margin-bottom: 24px;
+      line-height: 1;
+    }
+
+    .how-steps { display: flex; flex-direction: column; gap: 16px; }
+
+    .step { display: flex; gap: 16px; align-items: flex-start; }
+
+    .step-num {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: #000;
+      font-weight: 800;
+      font-size: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .step-text strong {
+      display: block;
+      font-size: 15px;
+      font-weight: 800;
+      margin-bottom: 2px;
+    }
+
+    .step-text span {
+      font-size: 13px;
+      color: var(--text-sub);
+      font-weight: 600;
+    }
+
+    .footer {
+      text-align: center;
+      padding: 24px 20px 40px;
+      border-top: 1px solid var(--border);
+    }
+
+    .footer-logo {
+      font-family: var(--font-display);
+      font-size: 28px;
+      letter-spacing: 0.05em;
+      margin-bottom: 8px;
+    }
+
+    .footer-logo span { color: var(--accent); }
+
+    .footer-text {
+      font-size: 12px;
+      color: var(--text-sub);
+      line-height: 1.6;
+    }
+
+    .footer-links {
+      display: flex;
+      justify-content: center;
+      gap: 16px;
+      margin-top: 12px;
+    }
+
+    .footer-links a {
+      font-size: 12px;
+      color: var(--text-sub);
+      text-decoration: none;
+    }
+
+    @keyframes fadeDown {
+      from { opacity: 0; transform: translateY(-16px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .es { display: none; }
+    .en { display: block; }
+    body.spanish .es { display: block; }
+    body.spanish .en { display: none; }
+    span.es { display: none; }
+    span.en { display: inline; }
+    body.spanish span.es { display: inline; }
+    body.spanish span.en { display: none; }
+  </style>
+</head>
+<body>
+
+  <div class="lang-bar">
+    <button class="lang-btn active" onclick="setLang('en')" id="btn-en">EN</button>
+    <button class="lang-btn" onclick="setLang('es')" id="btn-es">ES</button>
+  </div>
+
+  <section class="hero">
+    <div class="hero-badge">
+      <span class="en">🔥 Exclusive Offers — Limited Time</span>
+      <span class="es">🔥 Ofertas Exclusivas — Tiempo Limitado</span>
+    </div>
+    <h1 class="hero-title">
+      <span class="en">YOU <span>SCAN</span><br>YOU SAVE</span>
+      <span class="es">ESCANEAS<br>Y <span>AHORRAS</span></span>
+    </h1>
+    <p class="hero-sub">
+      <span class="en">Special deals just for you.<br><strong>No credit check. No catch. 100% free to apply.</strong></span>
+      <span class="es">Ofertas especiales solo para ti.<br><strong>Sin revisión de crédito. Sin trampa. Gratis aplicar.</strong></span>
+    </p>
+  </section>
+
+  <div class="offers">
+
+    <div class="offer-card">
+      <span class="offer-tag">
+        <span class="en">🚗 Auto Insurance Quote</span>
+        <span class="es">🚗 Cotización de Seguro de Auto</span>
+      </span>
+      <div class="offer-body">
+        <span class="offer-icon">🛡️</span>
+        <div class="offer-title">
+          <span class="en">FREE QUOTE IN 2 MIN</span>
+          <span class="es">COTIZACIÓN GRATIS EN 2 MIN</span>
+        </div>
+        <p class="offer-desc">
+          <span class="en">Compare rates and save up to $500/year on auto insurance. No obligation.</span>
+          <span class="es">Compara tarifas y ahorra hasta $500 al año en tu seguro de auto. Sin compromiso.</span>
+        </p>
+        <a href="INSURANCE_AFFILIATE_LINK_HERE" class="offer-btn" target="_blank" rel="nofollow">
+          <span class="en">Get My Free Quote →</span>
+          <span class="es">Obtener Mi Cotización Gratis →</span>
+        </a>
+        <p class="offer-disclaimer">
+          <span class="en">Free • Takes 2 minutes • No spam</span>
+          <span class="es">Gratis • Solo 2 minutos • Sin spam</span>
+        </p>
+      </div>
+    </div>
+
+    <div class="offer-card">
+      <span class="offer-tag">
+        <span class="en">🏦 Free Bank Account</span>
+        <span class="es">🏦 Cuenta Bancaria Gratis</span>
+      </span>
+      <div class="offer-body">
+        <span class="offer-icon">💳</span>
+        <div class="offer-title">
+          <span class="en">NO FEES EVER</span>
+          <span class="es">SIN COBROS NUNCA</span>
+        </div>
+        <p class="offer-desc">
+          <span class="en">Get a free bank account with no monthly fees, no minimums, and early direct deposit.</span>
+          <span class="es">Abre una cuenta bancaria gratis sin cargos mensuales, sin mínimo, y depósito directo anticipado.</span>
+        </p>
+        <a href="BANKING_AFFILIATE_LINK_HERE" class="offer-btn" target="_blank" rel="nofollow">
+          <span class="en">Open Free Account →</span>
+          <span class="es">Abrir Cuenta Gratis →</span>
+        </a>
+        <p class="offer-disclaimer">
+          <span class="en">Free • No credit check • Opens in minutes</span>
+          <span class="es">Gratis • Sin revisión de crédito • Abre en minutos</span>
+        </p>
+      </div>
+    </div>
+
+    <div class="offer-card">
+      <span class="offer-tag">
+        <span class="en">📱 Phone Plan Deal</span>
+        <span class="es">📱 Oferta de Plan de Teléfono</span>
+      </span>
+      <div class="offer-body">
+        <span class="offer-icon">📶</span>
+        <div class="offer-title">
+          <span class="en">$15/MO UNLIMITED</span>
+          <span class="es">$15/MES ILIMITADO</span>
+        </div>
+        <p class="offer-desc">
+          <span class="en">Unlimited talk, text and data. No annual contract. Switch in minutes and keep your number.</span>
+          <span class="es">Llamadas, mensajes y datos ilimitados. Sin contrato anual. Cambia en minutos y conserva tu número.</span>
+        </p>
+        <a href="PHONE_AFFILIATE_LINK_HERE" class="offer-btn" target="_blank" rel="nofollow">
+          <span class="en">Get This Deal →</span>
+          <span class="es">Obtener Esta Oferta →</span>
+        </a>
+        <p class="offer-disclaimer">
+          <span class="en">No contract • Keep your number • No credit check</span>
+          <span class="es">Sin contrato • Conserva tu número • Sin revisión de crédito</span>
+        </p>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="trust-bar">
+    <div class="trust-item">
+      <span class="trust-num">100%</span>
+      <span class="trust-label">
+        <span class="en">Free to Apply</span>
+        <span class="es">Gratis Aplicar</span>
+      </span>
+    </div>
+    <div class="trust-item">
+      <span class="trust-num">2 MIN</span>
+      <span class="trust-label">
+        <span class="en">To Complete</span>
+        <span class="es">Para Completar</span>
+      </span>
+    </div>
+    <div class="trust-item">
+      <span class="trust-num">0</span>
+      <span class="trust-label">
+        <span class="en">Hidden Fees</span>
+        <span class="es">Cargos Ocultos</span>
+      </span>
+    </div>
+  </div>
+
+  <section class="how">
+    <span class="section-label">
+      <span class="en">How It Works</span>
+      <span class="es">Cómo Funciona</span>
+    </span>
+    <h2 class="how-title">
+      <span class="en">THREE EASY STEPS</span>
+      <span class="es">TRES PASOS FÁCILES</span>
+    </h2>
+    <div class="how-steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-text">
+          <strong><span class="en">Pick Your Offer</span><span class="es">Elige Tu Oferta</span></strong>
+          <span><span class="en">Choose the deal that works best for you above.</span><span class="es">Elige la oferta que mejor te convenga arriba.</span></span>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-text">
+          <strong><span class="en">Tap the Button</span><span class="es">Toca el Botón</span></strong>
+          <span><span class="en">You'll be taken directly to the offer page. Takes 2 minutes.</span><span class="es">Te llevará directamente a la página de oferta. Solo 2 minutos.</span></span>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-text">
+          <strong><span class="en">Start Saving</span><span class="es">Empieza a Ahorrar</span></strong>
+          <span><span class="en">No obligation. No hidden fees. Just savings.</span><span class="es">Sin compromiso. Sin cargos ocultos. Solo ahorros.</span></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <div class="footer-logo">QR<span>PERKS</span></div>
+    <p class="footer-text">
+      <span class="en">Connecting Southern California to the best deals.<br>Seen on trucks near you.</span>
+      <span class="es">Conectando el Sur de California con las mejores ofertas.<br>Visto en camiones cerca de ti.</span>
+    </p>
+    <div class="footer-links">
+      <a href="/privacy"><span class="en">Privacy Policy</span><span class="es">Política de Privacidad</span></a>
+      <a href="/disclosure"><span class="en">Disclosure</span><span class="es">Divulgación</span></a>
+    </div>
+    <p class="footer-text" style="margin-top:12px;font-size:11px;">
+      <span class="en">© 2026 QRPerks. Some links are affiliate links. We may earn a commission at no cost to you.</span>
+      <span class="es">© 2026 QRPerks. Algunos enlaces son de afiliados. Podemos ganar una comisión sin costo para ti.</span>
+    </p>
+  </footer>
+
+  <script>
+    function setLang(lang) {
+      if (lang === 'es') {
+        document.body.classList.add('spanish');
+        document.getElementById('btn-es').classList.add('active');
+        document.getElementById('btn-en').classList.remove('active');
+        document.documentElement.lang = 'es';
+      } else {
+        document.body.classList.remove('spanish');
+        document.getElementById('btn-en').classList.add('active');
+        document.getElementById('btn-es').classList.remove('active');
+        document.documentElement.lang = 'en';
+      }
+    }
+    if (navigator.language && navigator.language.toLowerCase().startsWith('es')) {
+      setLang('es');
+    }
+  </script>
+
+</body>
+</html>
