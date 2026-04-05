@@ -991,7 +991,8 @@ async function handleAdminDashboard(request, env) {
       renderDashboard(DATA);
     }
     function renderDashboard(d) {
-      const activeTrucks = (d.trucks||[]).filter(t=>t.status==='active').length;
+      const trucks = (d.trucks||[]).sort((a,b) => parseInt(a.id.slice(1))-parseInt(b.id.slice(1)));
+      const activeTrucks = trucks.filter(t=>t.status==='active').length;
       const totalRevenue = (d.conversions||[]).reduce((s,c)=>s+parseFloat(c.gross_amount||0),0);
       const totalPayouts = (d.conversions||[]).reduce((s,c)=>s+parseFloat(c.driver_commission||0)+parseFloat(c.referral_commission||0),0);
       document.getElementById('kpi-trucks').textContent = activeTrucks;
@@ -1006,7 +1007,7 @@ async function handleAdminDashboard(request, env) {
       (d.scans||[]).forEach(s => { scansByTruck[s.truck_id] = (scansByTruck[s.truck_id]||0)+1; });
       const driverMap = {};
       (d.drivers||[]).forEach(dr => driverMap[dr.id] = dr.name || 'Unknown');
-      document.getElementById('tbody-trucks').innerHTML = (d.trucks||[]).map(t => \`
+      document.getElementById('tbody-trucks').innerHTML = trucks.map(t => \`
         <tr>
           <td style="font-weight:800;">\${t.id.toUpperCase()}</td>
           <td><span class="badge \${t.status==='active'?'badge-green':'badge-gray'}">\${t.status}</span></td>
