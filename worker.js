@@ -78,6 +78,7 @@ export default {
     if (path === '/api/admin/login' && method === 'POST') return handleAdminLogin(request, env);
     if (path === '/api/admin/data' && method === 'GET') return handleAdminData(request, env);
     if (path === '/api/driver/data' && method === 'GET') return handleDriverData(request, env);
+    if (path === '/api/email/subscribe' && method === 'POST') return handleEmailSubscribe(request, env);
 
     return new Response('Not Found', { status: 404 });
   }
@@ -204,6 +205,24 @@ async function handleApiAffiliates(request, env) {
 // ──────────────────────────────────────────────────────────────────
 // API: DRIVER REGISTER
 // ──────────────────────────────────────────────────────────────────
+// EMAIL SUBSCRIBE — POST /api/email/subscribe
+async function handleEmailSubscribe(request, env) {
+  try {
+    const body = await request.json();
+    const email = (body.email || '').trim().toLowerCase();
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return jsonResponse({ error: 'Valid email required' }, 400);
+    }
+    const truckId = body.truck_id || null;
+    const lang = body.lang || 'en';
+    await sbPost(env, 'email_signups', { email, truck_id: truckId, lang });
+    return jsonResponse({ ok: true });
+  } catch (e) {
+    // Duplicate email — still return ok (idempotent)
+    return jsonResponse({ ok: true });
+  }
+}
+
 async function handleDriverRegister(request, env) {
   let body;
   try { body = await request.json(); } catch { return jsonResponse({ error: 'Invalid JSON' }, 400); }
@@ -465,6 +484,17 @@ async function handleHome(request, env) {
     .step-text { display: flex; flex-direction: column; gap: 4px; padding-top: 6px; }
     .step-text strong { font-size: 15px; color: var(--text); }
     .step-text span { font-size: 14px; color: var(--text-sub); }
+    .email-capture { background: var(--surface); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: 28px 20px; text-align: center; max-width: 480px; margin: 0 auto; }
+    .email-capture-label { font-size: 11px; font-weight: 800; color: var(--accent); letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 8px; display: block; }
+    .email-capture h3 { font-family: var(--font-display); font-size: 26px; margin-bottom: 8px; }
+    .email-capture p { font-size: 13px; color: var(--text-sub); font-weight: 600; margin-bottom: 16px; }
+    .email-row { display: flex; gap: 8px; max-width: 360px; margin: 0 auto; }
+    .email-row input { flex: 1; background: #1E1E1E; border: 1px solid var(--border); color: var(--text); font-family: var(--font-body); font-size: 15px; padding: 12px 14px; border-radius: 10px; outline: none; }
+    .email-row input::placeholder { color: #555; }
+    .email-row input:focus { border-color: var(--accent); }
+    .email-row button { background: var(--accent); color: #000; font-family: var(--font-body); font-weight: 800; font-size: 14px; padding: 12px 18px; border: none; border-radius: 10px; cursor: pointer; white-space: nowrap; }
+    .email-row button:hover { opacity: 0.88; }
+    .email-msg { font-size: 13px; margin-top: 10px; font-weight: 700; min-height: 20px; }
     .driver-bar { background: var(--surface); border-top: 1px solid var(--border); padding: 20px; text-align: center; }
     .driver-bar p { font-size: 14px; color: var(--text-sub); margin-bottom: 10px; }
     .driver-bar a { color: var(--accent); font-weight: 800; text-decoration: none; font-size: 14px; }
@@ -544,6 +574,16 @@ async function handleHome(request, env) {
       </div>
     </div>
   </section>
+  <div class="email-capture">
+    <span class="email-capture-label"><span class="en">Stay in the Loop</span><span class="es">Mantente Informado</span></span>
+    <h3><span class="en">NEW DEALS EVERY WEEK</span><span class="es">OFERTAS NUEVAS CADA SEMANA</span></h3>
+    <p><span class="en">Get notified when better offers drop. No spam, ever.</span><span class="es">Recibe alertas de nuevas ofertas. Sin spam, nunca.</span></p>
+    <div class="email-row">
+      <input type="email" id="email-input" placeholder="your@email.com" autocomplete="email">
+      <button onclick="subscribeEmail()"><span class="en">Notify Me</span><span class="es">Avisarme</span></button>
+    </div>
+    <p class="email-msg" id="email-msg"></p>
+  </div>
   <div class="driver-bar">
     <p><span class="en">Are you a driver? Track your earnings.</span><span class="es">¿Eres conductor? Rastrea tus ganancias.</span></p>
     <a href="/driver"><span class="en">Driver Portal →</span><span class="es">Portal del Conductor →</span></a>
@@ -568,6 +608,32 @@ async function handleHome(request, env) {
   <script>
     const truckId = new URLSearchParams(location.search).get('t');
     if (truckId) document.cookie = 'qrp_truck=' + truckId + '; path=/; max-age=86400; samesite=lax';
+    async function subscribeEmail() {
+      const email = document.getElementById('email-input').value.trim();
+      const msg = document.getElementById('email-msg');
+      if (!email || !email.includes('@')) {
+        msg.style.color = '#f55'; msg.textContent = 'Please enter a valid email.';
+        return;
+      }
+      const truckId = new URLSearchParams(location.search).get('t') || null;
+      const lang = document.body.classList.contains('spanish') ? 'es' : 'en';
+      msg.style.color = '#999'; msg.textContent = '...';
+      try {
+        const res = await fetch('/api/email/subscribe', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ email, truck_id: truckId, lang })
+        });
+        if (res.ok) {
+          msg.style.color = '#00C896';
+          msg.textContent = lang === 'es' ? '✓ ¡Listo! Te avisaremos.' : '✓ You're in! We'll notify you.';
+          document.getElementById('email-input').value = '';
+        } else {
+          msg.style.color = '#f55'; msg.textContent = 'Something went wrong. Try again.';
+        }
+      } catch(e) {
+        msg.style.color = '#f55'; msg.textContent = 'Something went wrong. Try again.';
+      }
+    }
     function setLang(lang) {
       if (lang === 'es') {
         document.body.classList.add('spanish');
