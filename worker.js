@@ -5,43 +5,43 @@
 const FALLBACK_AFFILIATES = [
   {
     id: 'rok-financial', name: 'ROK Financial', category: 'business_funding',
-    description_en: 'Get up to $500K in business funding. Fast approval, no collateral.',
-    description_es: 'Obtén hasta $500K en financiamiento empresarial. Aprobación rápida, sin garantía.',
+    description_en: 'Get up to $500K in business funding. Fast approvals, flexible terms.',
+    description_es: 'Obtén hasta $500K en financiamiento. Aprobaciones rápidas, términos flexibles.',
     cta_en: 'Apply Now — Free →', cta_es: 'Aplicar Ahora — Gratis →',
     badge_en: '💰 Business Funding', badge_es: '💰 Financiamiento',
-    icon: '💼', color: '#F5C518', status: 'live'
+    icon: '💼', color: '#F5C518', status: 'active'
   },
   {
-    id: 'auto-insurance', name: 'Auto Insurance', category: 'insurance',
-    description_en: 'Compare rates and save up to $500/year. No obligation.',
-    description_es: 'Compara tarifas y ahorra hasta $500 al año. Sin compromiso.',
+    id: 'paypal-sweeps', name: 'Win $1000 PayPal Cash', category: 'sweepstakes',
+    description_en: 'Enter to win $1,000 PayPal Cash. Free entry, instant prizes!',
+    description_es: 'Participa para ganar $1,000 en efectivo PayPal. ¡Entrada gratis!',
+    cta_en: 'Enter Free Now →', cta_es: 'Participar Gratis →',
+    badge_en: '🎰 Win $1,000 Cash', badge_es: '🎰 Gana $1,000 en Efectivo',
+    icon: '💵', color: '#009CDE', status: 'active'
+  },
+  {
+    id: 'auto-insurance', name: 'Save on Auto Insurance', category: 'insurance',
+    description_en: 'Compare rates and save hundreds on auto insurance. Free quote in seconds.',
+    description_es: 'Compara precios y ahorra en tu seguro de auto. Cotización gratis en segundos.',
     cta_en: 'Get Free Quote →', cta_es: 'Cotización Gratis →',
-    badge_en: '🚗 Auto Insurance', badge_es: '🚗 Seguro de Auto',
-    icon: '🛡️', color: '#FF4D4D', status: 'coming_soon'
+    badge_en: '🛡️ Auto Insurance', badge_es: '🛡️ Seguro de Auto',
+    icon: '🚗', color: '#FF4D4D', status: 'active'
   },
   {
-    id: 'banking', name: 'Free Bank Account', category: 'banking',
-    description_en: 'No fees, no minimums, early direct deposit.',
-    description_es: 'Sin cargos, sin mínimo, depósito directo anticipado.',
-    cta_en: 'Open Free Account →', cta_es: 'Abrir Cuenta Gratis →',
-    badge_en: '🏦 Free Banking', badge_es: '🏦 Banco Gratis',
-    icon: '💳', color: '#00C896', status: 'coming_soon'
+    id: 'dinero-dinero', name: 'Dinero Dinero Préstamos', category: 'loans',
+    description_en: 'Get the cash you need fast. Easy personal loans up to $5,000.',
+    description_es: 'Obtén el dinero que necesitas rápido. Préstamos hasta $5,000.',
+    cta_en: 'Get Cash Now →', cta_es: 'Obtener Dinero →',
+    badge_en: '💳 Personal Loans', badge_es: '💳 Préstamos Personales',
+    icon: '💸', color: '#00C896', status: 'active'
   },
   {
-    id: 'phone-plan', name: 'Phone Plan', category: 'phone',
-    description_en: 'Unlimited talk, text & data from $15/mo. Keep your number.',
-    description_es: 'Llamadas, mensajes y datos ilimitados desde $15/mes.',
-    cta_en: 'Get This Deal →', cta_es: 'Obtener Esta Oferta →',
-    badge_en: '📱 Phone Plan', badge_es: '📱 Plan de Teléfono',
-    icon: '📶', color: '#4D9EFF', status: 'coming_soon'
-  },
-  {
-    id: 'gas-savings', name: 'Gas Savings', category: 'gas',
-    description_en: 'Save up to 25¢/gallon every fill-up. Free app, real cash back.',
-    description_es: 'Ahorra hasta 25¢/galón. App gratis, dinero real de regreso.',
-    cta_en: 'Save on Gas Free →', cta_es: 'Ahorrar en Gas Gratis →',
-    badge_en: '⛽ Gas Savings', badge_es: '⛽ Ahorro en Gasolina',
-    icon: '⛽', color: '#FF8C00', status: 'coming_soon'
+    id: 'maybelline', name: 'Free Maybelline Set', category: 'sweepstakes',
+    description_en: 'Claim your free Maybelline makeup set. Limited time offer!',
+    description_es: '¡Reclama tu set de maquillaje Maybelline gratis. Oferta limitada!',
+    cta_en: 'Claim Free Set →', cta_es: 'Reclamar Gratis →',
+    badge_en: '🎁 Free Beauty Set', badge_es: '🎁 Set de Belleza Gratis',
+    icon: '💄', color: '#FF69B4', status: 'active'
   }
 ];
 
@@ -175,9 +175,9 @@ async function handleGo(request, env, path) {
     destUrl = fb ? fb.url : 'https://qr-perks.com';
   }
 
-  // Append subid to URL
+  // Append truck attribution to URL
   const dest = new URL(destUrl);
-  dest.searchParams.set('subid', `qrp_${truckId}`);
+  dest.searchParams.set('s2', `qrp_${truckId}`);
   dest.searchParams.set('utm_source', 'qrperks');
   dest.searchParams.set('utm_medium', 'qr');
   dest.searchParams.set('utm_campaign', truckId);
@@ -392,7 +392,7 @@ async function handleHome(request, env) {
 
   const cards = affiliates.map((a, i) => {
     const color = a.color || cardColors[i % cardColors.length];
-    const isLive = a.status === 'live';
+    const isLive = a.status === 'live' || a.status === 'active';
     const linkHref = isLive ? `/go/${a.id}${truckId ? `?t=${truckId}` : ''}` : '#';
     const btnStyle = isLive
       ? `background:${color};color:${color === '#F5C518' || color === '#00C896' ? '#000' : '#fff'};`
