@@ -3,23 +3,23 @@
 //      RESEND_API_KEY, DRIVER_JWT_SECRET, W9_ENCRYPTION_KEY
 
 const FALLBACK_AFFILIATES = [
-  { id:'paypal-sweeps', name:'Win $1,000 PayPal Cash', offer_type:'financial', display_order:1, is_featured:true,
+  { id:'paypal-sweeps', name:'Win $1,000 PayPal Cash', url:'https://afflat3c1.com/trk/lnk/C8CC1E8D-9D2D-46AD-842E-9CEDD11DD805/?o=25393&c=918277&a=792250&k=4418E8A3B088D83CB0ED1E0B6C09CC86&l=26602&s1=qrp_paypal', offer_type:'financial', display_order:1, is_featured:true,
     icon:'💵', status:'active', prize_description:'Win $1,000 PayPal Cash', prize_description_es:'Gana $1,000 en Efectivo PayPal',
     cta_text:'Get PayPal Free', cta_text_es:'Obtener PayPal Gratis',
     description_en:'Free entry — no purchase required. Takes 30 seconds.', description_es:'Entrada gratis — sin compra. Solo 30 segundos.' },
-  { id:'walmart-sweeps', name:'Win $1,000 Walmart Gift Card', offer_type:'retail', display_order:2, is_featured:false,
+  { id:'walmart-sweeps', name:'Win $1,000 Walmart Gift Card', url:'https://afflat3c1.com/trk/lnk/C8CC1E8D-9D2D-46AD-842E-9CEDD11DD805/?o=25394&c=918277&a=792250&k=BC203D6D8247B0DF7720B1CB839DB387&l=26603&s1=qrp_walmart', offer_type:'retail', display_order:2, is_featured:false,
     icon:'🛒', status:'active', prize_description:'Win $1,000 Walmart Gift Card', prize_description_es:'Gana $1,000 en Tarjeta Walmart',
     cta_text:'Shop Walmart Deals', cta_text_es:'Ofertas Walmart',
     description_en:'Free entry — no purchase required.', description_es:'Entrada gratis — sin compra.' },
-  { id:'maybelline', name:'Free Maybelline Beauty Set', offer_type:'beauty', display_order:3, is_featured:false,
+  { id:'maybelline', name:'Free Maybelline Beauty Set', url:'https://afflat3c2.com/trk/lnk/C8CC1E8D-9D2D-46AD-842E-9CEDD11DD805/?o=24725&c=918277&a=792250&k=AFFE5632AE95E70324B4F71AD9308645&l=25813&s1=qrp_maybelline', offer_type:'beauty', display_order:3, is_featured:false,
     icon:'💄', status:'active', prize_description:'Free Maybelline Beauty Set', prize_description_es:'Set de Belleza Maybelline Gratis',
     cta_text:'Claim Beauty Deal', cta_text_es:'Obtener Oferta',
     description_en:'Claim your free makeup set. Limited quantities.', description_es:'Reclama tu set gratis. Cantidades limitadas.' },
-  { id:'slam-dunk-loans', name:'Personal Loans Up to $50K', offer_type:'loans', display_order:4, is_featured:false,
+  { id:'slam-dunk-loans', name:'Personal Loans Up to $50K', url:'https://afflat3c1.com/trk/lnk/C8CC1E8D-9D2D-46AD-842E-9CEDD11DD805/?o=11384&c=918277&a=792250&k=D911FDB90B20C8BB32EEBCE9ED5B6CAC&l=11476&s1=qrp_loans', offer_type:'loans', display_order:4, is_featured:false,
     icon:'🏀', status:'active', prize_description:'Personal Loans Up to $50K', prize_description_es:'Préstamos Hasta $50K',
     cta_text:'Get Loan Offer', cta_text_es:'Obtener Préstamo',
     description_en:'Quick approval, flexible terms. Apply in minutes.', description_es:'Aprobación rápida, términos flexibles.' },
-  { id:'rok-financial', name:'Business Funding Up to $500K', offer_type:'financial', display_order:5, is_featured:false,
+  { id:'rok-financial', name:'Business Funding Up to $500K', url:'https://go.mypartner.io/business-financing/?ref=001Qk00000jaDEZIA2', offer_type:'financial', display_order:5, is_featured:false,
     icon:'💼', status:'active', prize_description:'Business Funding Up to $500K', prize_description_es:'Financiamiento Hasta $500K',
     cta_text:'Get Funded', cta_text_es:'Obtener Financiamiento',
     description_en:'Fast approvals. Get up to $500K for your business.', description_es:'Hasta $500K para tu negocio.' },
@@ -111,6 +111,9 @@ label{display:block;font-size:13px;color:var(--sub);margin-bottom:6px;font-weigh
 .msg-ok.show{display:block}
 .msg-err{background:#ef444412;border:1px solid #ef444440;color:#ef4444;padding:12px 16px;border-radius:var(--r-md);font-size:14px;display:none}
 .msg-err.show{display:block}
+.es{display:none}
+[data-lang="es"] .es{display:unset}
+[data-lang="es"] .en{display:none}
 `;
 
 // ─── MAIN EXPORT ───
@@ -505,7 +508,7 @@ async function handleGo(request, env, path) {
   } catch {}
   if (!destUrl) {
     const fb = FALLBACK_AFFILIATES.find(a=>a.id===affiliateId);
-    destUrl = fb ? 'https://qr-perks.com' : 'https://qr-perks.com';
+    destUrl = fb?.url || 'https://qr-perks.com';
   }
   try {
     const dest = new URL(destUrl);
@@ -589,7 +592,7 @@ async function handleTruckPage(request, env, ctx, truckId) {
   };
 
   return html(`<!DOCTYPE html>
-<html lang="en" id="qrp-root">
+<html lang="en" id="qrp-root" data-lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
@@ -663,8 +666,7 @@ ${DS}
 .br-skip{background:none;border:none;color:var(--sub);font-size:13px;text-decoration:underline;margin-top:8px}
 .br-close{position:absolute;top:20px;right:20px;background:none;border:none;color:var(--sub);font-size:24px;cursor:pointer;padding:8px}
 .spacer{height:40px}
-/* EN/ES toggle */
-.en,.es{display:none}
+/* EN/ES toggle handled by DS [data-lang] rules */
 </style>
 </head>
 <body>
@@ -684,14 +686,17 @@ ${DS}
 
 <header class="hdr">
   <div class="logo">QR PERKS</div>
-  <button class="lang-btn" id="lang-btn">ES</button>
+  <div style="display:flex;align-items:center;gap:10px">
+    <a href="/driver" class="btn-outline btn btn-sm" style="min-height:36px;padding:0 14px;font-size:13px;text-decoration:none"><span class="en">Driver Login</span><span class="es">Acceso Conductores</span></a>
+    <button class="lang-btn" id="lang-btn">ES</button>
+  </div>
 </header>
 
 <section class="hero">
   <h1><span class="en">Scan. <span class="acc">Save.</span> Score.</span><span class="es">Escanea. <span class="acc">Ahorra.</span> Gana.</span></h1>
   <p class="hero-sub"><span class="en">Exclusive deals delivered straight to your phone — just scan the QR code on the truck.</span><span class="es">Ofertas exclusivas directo a tu teléfono — solo escanea el código QR del camión.</span></p>
   <form class="hero-form" onsubmit="heroCapture(event)">
-    <input type="email" id="hero-email" name="email" required>
+    <input type="email" id="hero-email" name="email" required placeholder="Enter your email">
     <button type="submit" class="btn"><span class="en">Get My Deal</span><span class="es">Obtener Mi Oferta</span></button>
   </form>
 </section>
@@ -734,6 +739,7 @@ ${loans.map(a=>offerCard(a, true)).join('')}
     <a href="/terms"><span class="en">Terms of Service</span><span class="es">Términos</span></a>
     <a href="/earnings-disclaimer"><span class="en">Earnings Disclaimer</span><span class="es">Aviso de Ganancias</span></a>
     <a href="/contact"><span class="en">Contact</span><span class="es">Contacto</span></a>
+    <a href="/driver"><span class="en">Driver Portal</span><span class="es">Portal Conductores</span></a>
   </div>
   <p class="foot-copy"><span class="en">© 2025 QR-Perks.com. All rights reserved.</span><span class="es">© 2025 QR-Perks.com. Todos los derechos reservados.</span></p>
 </footer>
@@ -744,18 +750,17 @@ ${loans.map(a=>offerCard(a, true)).join('')}
 const TRUCK_ID = ${JSON.stringify(truckId)};
 let bridgeUrl = null, autoTimer = null;
 
-function getLang(){return localStorage.getItem('qrp_lang')||(navigator.language||'').startsWith('es')?'es':'en';}
+function getLang(){const s=localStorage.getItem('qrp-lang');if(s)return s;return(navigator.language||'').startsWith('es')?'es':'en';}
 function setLang(l){
-  localStorage.setItem('qrp_lang',l);
-  document.getElementById('lang-btn').textContent = l==='en'?'ES':'EN';
-  document.querySelectorAll('.en').forEach(el=>el.style.display=l==='en'?'':'none');
-  document.querySelectorAll('.es').forEach(el=>el.style.display=l==='es'?'':'none');
+  localStorage.setItem('qrp-lang',l);
+  document.documentElement.setAttribute('data-lang',l);
+  document.getElementById('lang-btn').textContent=l==='en'?'ES':'EN';
   const br=document.getElementById('br-email');
   const bp=document.getElementById('br-phone');
-  if(br) br.placeholder=l==='en'?'Your email (optional)':'Tu correo (opcional)';
-  if(bp) bp.placeholder=l==='en'?'Phone for SMS alerts (optional)':'Teléfono para SMS (opcional)';
+  if(br)br.placeholder=l==='en'?'Your email (optional)':'Tu correo (opcional)';
+  if(bp)bp.placeholder=l==='en'?'Phone for SMS alerts (optional)':'Teléfono para SMS (opcional)';
   const hi=document.getElementById('hero-email');
-  if(hi) hi.placeholder=l==='en'?'Enter your email':'Ingresa tu correo';
+  if(hi)hi.placeholder=l==='en'?'Enter your email':'Ingresa tu correo';
 }
 document.getElementById('lang-btn').addEventListener('click',()=>setLang(getLang()==='en'?'es':'en'));
 setLang(getLang());
@@ -783,7 +788,7 @@ function openBridge(affiliateId, subId, nameEn, nameEs){
   document.getElementById('br-skip').onclick=()=>{clearTimeout(autoTimer);doRedirect();};
 }
 function closeBridge(){clearTimeout(autoTimer);document.getElementById('bridge').classList.remove('show');document.getElementById('br-fill').style.width='0';}
-function doRedirect(){if(bridgeUrl)window.location.href=bridgeUrl;}
+function doRedirect(){if(bridgeUrl)window.open(bridgeUrl,'_blank');closeBridge();}
 function heroCapture(e){
   e.preventDefault();
   const email=document.getElementById('hero-email').value.trim();
@@ -804,7 +809,7 @@ const affiliates=${JSON.stringify(affiliates.map(a=>({id:a.id,prize_description:
 // ═══════════════════════════════════════════════════════════════
 
 const authShell = (title, content, script='') => html(`<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8">
+<html lang="en" data-lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${title} — QR Perks</title>
 <style>
@@ -826,6 +831,7 @@ body{display:flex;align-items:center;justify-content:center;min-height:100vh;pad
   </div>
 </div>
 ${script}
+<script>(function(){var s=localStorage.getItem('qrp-lang');var l=s?s:((navigator.language||'').startsWith('es')?'es':'en');document.documentElement.setAttribute('data-lang',l);})();</script>
 </body></html>`);
 
 // ─── LOGIN ───
@@ -1038,7 +1044,7 @@ async function handleDriverLogout(request, env) {
 // ═══════════════════════════════════════════════════════════════
 
 const dashShell = (title, active, content, script='') => html(`<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8">
+<html lang="en" data-lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${title} — QR Perks</title>
 <style>
@@ -1432,7 +1438,7 @@ async function handleDriverSettingsPost(request, env, driver) {
 // ═══════════════════════════════════════════════════════════════
 
 const adminShell = (title, content) => html(`<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8">
+<html lang="en" data-lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${title} — Admin</title>
 <style>
@@ -1711,11 +1717,10 @@ async function runMonthlyCommissions(env) {
 
 async function handleContactPage(request, env) {
   return html(`<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8">
+<html lang="en" data-lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Contact — QR Perks</title>
 <style>${DS}
-.en,.es{display:none}
 .page{padding:40px 24px;max-width:640px;margin:0 auto}
 .logo{font-size:18px;font-weight:900;letter-spacing:3px;color:var(--acc);margin-bottom:28px}
 .back{color:var(--acc);font-size:13px;display:inline-block;margin-bottom:20px}
@@ -1742,8 +1747,8 @@ h1{font-size:26px;font-weight:800;margin-bottom:8px}
 <p style="color:var(--sub);font-size:14px"><span class="en">Email us directly:</span><span class="es">Escríbenos directamente:</span> <a href="mailto:support@qr-perks.com">support@qr-perks.com</a></p>
 </div>
 <script>
-function getLang(){return localStorage.getItem('qrp_lang')||(navigator.language||'').startsWith('es')?'es':'en';}
-function setLang(l){document.querySelectorAll('.en').forEach(el=>el.style.display=l==='en'?'':'none');document.querySelectorAll('.es').forEach(el=>el.style.display=l==='es'?'':'none');}
+function getLang(){const s=localStorage.getItem('qrp-lang');if(s)return s;return(navigator.language||'').startsWith('es')?'es':'en';}
+function setLang(l){localStorage.setItem('qrp-lang',l);document.documentElement.setAttribute('data-lang',l);}
 setLang(getLang());
 async function sendContact(){
   const r=await fetch('/api/contact',{method:'POST',headers:{'Content-Type':'application/json'},
@@ -1772,11 +1777,10 @@ async function handleContactPost(request, env) {
 // ═══════════════════════════════════════════════════════════════
 
 const legalShell = (title, body) => html(`<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8">
+<html lang="en" data-lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${title} — QR Perks</title>
 <style>${DS}
-.en,.es{display:none}
 .lpage{padding:40px 24px;max-width:720px;margin:0 auto;line-height:1.75}
 .logo{font-size:18px;font-weight:900;letter-spacing:3px;color:var(--acc);margin-bottom:28px}
 .back{color:var(--acc);font-size:13px;display:inline-block;margin-bottom:20px}
@@ -1793,8 +1797,8 @@ ul{color:var(--sub);font-size:15px;padding-left:20px;margin-bottom:14px;line-hei
 ${body}
 </div>
 <script>
-function getLang(){return localStorage.getItem('qrp_lang')||(navigator.language||'').startsWith('es')?'es':'en';}
-function setLang(l){document.querySelectorAll('.en').forEach(el=>el.style.display=l==='en'?'':'none');document.querySelectorAll('.es').forEach(el=>el.style.display=l==='es'?'':'none');}
+function getLang(){const s=localStorage.getItem('qrp-lang');if(s)return s;return(navigator.language||'').startsWith('es')?'es':'en';}
+function setLang(l){localStorage.setItem('qrp-lang',l);document.documentElement.setAttribute('data-lang',l);}
 setLang(getLang());
 </script>
 </body></html>`);
