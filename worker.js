@@ -491,7 +491,7 @@ async function handleTruck(request, env, ctx, truckId) {
 
 async function handleJoin(request, env) {
   const ref = new URL(request.url).searchParams.get('ref') || '';
-  return Response.redirect(`/driver/signup?ref=${encodeURIComponent(ref)}`, 302);
+  return Response.redirect(new URL(`/driver/signup?ref=${encodeURIComponent(ref)}`, request.url).toString(), 302);
 }
 
 async function handleGo(request, env, path) {
@@ -946,11 +946,11 @@ async function handleDriverVerifyEmail(request, env) {
   if (!token) return authShell('Verify Email', '<h1>Invalid Link</h1><p class="auth-sub">Missing verification token.</p>');
   const rec = await sbGetOne(env, 'email_verifications', `token=eq.${token}&select=*`);
   if (!rec) return authShell('Verify Email', '<h1>Invalid Link</h1><p class="auth-sub">This link is invalid or already used.</p>');
-  if (rec.verified) return Response.redirect('/driver/login?msg=verified', 302);
+  if (rec.verified) return Response.redirect(new URL('/driver/login?msg=verified', request.url).toString(), 302);
   if (new Date(rec.expires_at)<new Date()) return authShell('Verify Email', '<h1>Link Expired</h1><p class="auth-sub"><a href="/driver/signup">Sign up again</a> or contact support.</p>');
   await sbPatch(env, 'email_verifications', `id=eq.${rec.id}`, { verified:true });
   await sbPatch(env, 'drivers', `id=eq.${rec.driver_id}`, { email_verified:true, email_verified_at:new Date().toISOString() });
-  return Response.redirect('/driver/login?msg=verified', 302);
+  return Response.redirect(new URL('/driver/login?msg=verified', request.url).toString(), 302);
 }
 
 async function handleDriverForgotPage(request, env) {
@@ -1472,7 +1472,7 @@ form{display:inline}
 </body></html>`);
 
 async function handleAdminLoginPage(request, env) {
-  if (isAdminAuthed(request, env)) return Response.redirect('/admin/dashboard', 302);
+  if (isAdminAuthed(request, env)) return Response.redirect(new URL('/admin/dashboard', request.url).toString(), 302);
   return html(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Admin</title>
 <style>
 ${DS}
@@ -1510,7 +1510,7 @@ async function handleAdminLoginPost(request, env) {
 }
 
 async function handleAdminDashboard(request, env) {
-  if (!isAdminAuthed(request, env)) return Response.redirect('/admin/login', 302);
+  if (!isAdminAuthed(request, env)) return Response.redirect(new URL('/admin/login', request.url).toString(), 302);
 
   // Fetch all data defensively
   let drivers=[], commissions=[], affiliates=[], captures=[], w9s=[];
@@ -1617,7 +1617,7 @@ ${captures.slice(0,60).map(c=>`<tr>
 }
 
 async function handleAdminApproveDriver(request, env) {
-  if (!isAdminAuthed(request, env)) return Response.redirect('/admin/login', 302);
+  if (!isAdminAuthed(request, env)) return Response.redirect(new URL('/admin/login', request.url).toString(), 302);
   const form = await request.formData();
   const driver_id = form.get('driver_id');
   if (driver_id) {
@@ -1627,33 +1627,33 @@ async function handleAdminApproveDriver(request, env) {
       await sendEmail(env, { to:driver.email, subject:'Your QR Perks account is approved!', html:emailWelcome(driver), template_name:'welcome' });
     }
   }
-  return Response.redirect('/admin/dashboard#drivers', 302);
+  return Response.redirect(new URL('/admin/dashboard#drivers', request.url).toString(), 302);
 }
 
 async function handleAdminDenyDriver(request, env) {
-  if (!isAdminAuthed(request, env)) return Response.redirect('/admin/login', 302);
+  if (!isAdminAuthed(request, env)) return Response.redirect(new URL('/admin/login', request.url).toString(), 302);
   const form = await request.formData();
   const driver_id = form.get('driver_id');
   if (driver_id) await sbPatch(env, 'drivers', `id=eq.${driver_id}`, { status:'suspended' });
-  return Response.redirect('/admin/dashboard#drivers', 302);
+  return Response.redirect(new URL('/admin/dashboard#drivers', request.url).toString(), 302);
 }
 
 async function handleAdminCalcCommissions(request, env) {
-  if (!isAdminAuthed(request, env)) return Response.redirect('/admin/login', 302);
+  if (!isAdminAuthed(request, env)) return Response.redirect(new URL('/admin/login', request.url).toString(), 302);
   await calculateCommissions(env);
-  return Response.redirect('/admin/dashboard#commissions', 302);
+  return Response.redirect(new URL('/admin/dashboard#commissions', request.url).toString(), 302);
 }
 
 async function handleAdminMarkPaid(request, env) {
-  if (!isAdminAuthed(request, env)) return Response.redirect('/admin/login', 302);
+  if (!isAdminAuthed(request, env)) return Response.redirect(new URL('/admin/login', request.url).toString(), 302);
   const form = await request.formData();
   const id = form.get('commission_id');
   if (id) await sbPatch(env, 'commissions', `id=eq.${id}`, { status:'paid', paid_at:new Date().toISOString() });
-  return Response.redirect('/admin/dashboard#commissions', 302);
+  return Response.redirect(new URL('/admin/dashboard#commissions', request.url).toString(), 302);
 }
 
 async function handleAdminUpdateOffer(request, env) {
-  if (!isAdminAuthed(request, env)) return Response.redirect('/admin/login', 302);
+  if (!isAdminAuthed(request, env)) return Response.redirect(new URL('/admin/login', request.url).toString(), 302);
   const form = await request.formData();
   const affiliate_id = form.get('affiliate_id');
   const action = form.get('action');
@@ -1665,15 +1665,15 @@ async function handleAdminUpdateOffer(request, env) {
       await sbPatch(env, 'affiliates', `id=eq.${affiliate_id}`, { is_featured:true });
     } else if (action==='unfeature') await sbPatch(env, 'affiliates', `id=eq.${affiliate_id}`, { is_featured:false });
   }
-  return Response.redirect('/admin/dashboard#offers', 302);
+  return Response.redirect(new URL('/admin/dashboard#offers', request.url).toString(), 302);
 }
 
 async function handleAdminW9Review(request, env) {
-  if (!isAdminAuthed(request, env)) return Response.redirect('/admin/login', 302);
+  if (!isAdminAuthed(request, env)) return Response.redirect(new URL('/admin/login', request.url).toString(), 302);
   const form = await request.formData();
   const id = form.get('w9_id');
   if (id) await sbPatch(env, 'w9_submissions', `id=eq.${id}`, { reviewed:true, reviewed_at:new Date().toISOString() });
-  return Response.redirect('/admin/dashboard#w9', 302);
+  return Response.redirect(new URL('/admin/dashboard#w9', request.url).toString(), 302);
 }
 
 function handleAdminLogout(request, env) {
