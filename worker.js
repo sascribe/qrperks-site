@@ -1,4 +1,4 @@
-// QR-Perks Cloudflare Worker — v4 Full Audit Fix 2026-04-13
+// QR-Perks Cloudflare Worker — v5 Full Platform Fix 2026-04-13
 // Env: SUPABASE_URL, SUPABASE_SECRET, ADMIN_PASSWORD,
 //      RESEND_API_KEY, DRIVER_JWT_SECRET, W9_ENCRYPTION_KEY
 
@@ -164,20 +164,27 @@ async function route(request, env, ctx) {
     'GET /driver/signup':       () => handleDriverSignupPage(request, env),
     'POST /driver/signup':      () => handleDriverSignupPost(request, env),
     'GET /driver/verify-email': () => handleDriverVerifyEmail(request, env),
-    'GET /driver/forgot':       () => handleDriverForgotPage(request, env),
-    'POST /driver/forgot':      () => handleDriverForgotPost(request, env),
-    'GET /driver/reset':        () => handleDriverResetPage(request, env),
-    'POST /driver/reset':       () => handleDriverResetPost(request, env),
-    'POST /driver/logout':      () => handleDriverLogout(request, env),
-    'GET /driver/dashboard':    () => requireDriver(request, env, handleDriverDashboard),
-    'GET /driver/qr-codes':     () => requireDriver(request, env, handleDriverQrCodes),
-    'POST /driver/qr-codes':    () => requireDriver(request, env, handleDriverQrCodesPost),
-    'GET /driver/w9':           () => requireDriver(request, env, handleDriverW9Page),
-    'POST /driver/w9':          () => requireDriver(request, env, handleDriverW9Post),
-    'GET /driver/referrals':    () => requireDriver(request, env, handleDriverReferrals),
-    'GET /driver/earnings':     () => requireDriver(request, env, handleDriverEarnings),
-    'GET /driver/settings':     () => requireDriver(request, env, handleDriverSettings),
-    'POST /driver/settings':    () => requireDriver(request, env, handleDriverSettingsPost),
+    'GET /driver/forgot':             () => handleDriverForgotPage(request, env),
+    'POST /driver/forgot':            () => handleDriverForgotPost(request, env),
+    'GET /driver/forgot-password':    () => handleDriverForgotPage(request, env),
+    'POST /driver/forgot-password':   () => handleDriverForgotPost(request, env),
+    'GET /driver/reset':              () => handleDriverResetPage(request, env),
+    'POST /driver/reset':             () => handleDriverResetPost(request, env),
+    'GET /driver/reset-password':     () => handleDriverResetPage(request, env),
+    'POST /driver/reset-password':    () => handleDriverResetPost(request, env),
+    'GET /driver/verify':             () => handleDriverVerifyEmail(request, env),
+    'POST /driver/logout':            () => handleDriverLogout(request, env),
+    'GET /driver/dashboard':          () => requireDriver(request, env, handleDriverDashboard),
+    'GET /driver/qr-codes':           () => requireDriver(request, env, handleDriverQrCodes),
+    'POST /driver/qr-codes':          () => requireDriver(request, env, handleDriverQrCodesPost),
+    'GET /driver/w9':                 () => requireDriver(request, env, handleDriverW9Page),
+    'POST /driver/w9':                () => requireDriver(request, env, handleDriverW9Post),
+    'GET /driver/referrals':          () => requireDriver(request, env, handleDriverReferrals),
+    'GET /driver/earnings':           () => requireDriver(request, env, handleDriverEarnings),
+    'GET /driver/settings':           () => requireDriver(request, env, handleDriverSettings),
+    'POST /driver/settings':          () => requireDriver(request, env, handleDriverSettingsPost),
+    'POST /driver/set-payment':       () => requireDriver(request, env, handleDriverSetPayment),
+    'POST /driver/accept-contractor': () => requireDriver(request, env, handleDriverAcceptContractor),
   };
   const dKey = `${method} ${path}`;
   if (driverRoutes[dKey]) return await driverRoutes[dKey]();
@@ -205,6 +212,9 @@ async function route(request, env, ctx) {
   // Landing page
   if (path === '/') return handleHome(request, env, ctx);
 
+  // Subscribe endpoint
+  if (path === '/subscribe' && method === 'POST') return handleCapture(request, env);
+
   // Static / legal pages
   if (path === '/privacy')             return staticPage('privacy');
   if (path === '/terms')               return staticPage('terms');
@@ -212,6 +222,7 @@ async function route(request, env, ctx) {
   if (path === '/earnings-disclaimer') return staticPage('earnings');
   if (path === '/contact')             return handleContactPage(request, env);
   if (path === '/contractor')          return staticPage('contractor');
+  if (path === '/leads-terms')         return staticPage('leads-terms');
   if (path === '/unsubscribe')         return staticPage('unsubscribe');
 
   return html404();
@@ -507,7 +518,10 @@ async function handleTruck(request, env, ctx, truckId) {
 
 async function handleJoin(request, env) {
   const ref = new URL(request.url).searchParams.get('ref') || '';
-  return Response.redirect(new URL(`/driver/signup?ref=${encodeURIComponent(ref)}`, request.url).toString(), 302);
+  const redirectUrl = new URL(`/driver/signup?ref=${encodeURIComponent(ref)}`, request.url).toString();
+  const resp = new Response(null, { status:302, headers:{ 'Location': redirectUrl } });
+  if (ref) resp.headers.set('Set-Cookie', `qrp_ref=${encodeURIComponent(ref)}; Path=/; Max-Age=86400; SameSite=Lax`);
+  return resp;
 }
 
 async function handleGo(request, env, path) {
@@ -895,7 +909,7 @@ async function handleDriverLoginPost(request, env) {
 
 // ─── SIGNUP ───
 async function handleDriverSignupPage(request, env) {
-  const ref = new URL(request.url).searchParams.get('ref') || '';
+  const ref = new URL(request.url).searchParams.get('ref') || getCookie(request, 'qrp_ref') || '';
   return authShell('Join QR Perks', `
 <h1>Join QR Perks</h1>
 <p class="auth-sub">Apply to become a driver and earn passive income</p>
@@ -1124,10 +1138,62 @@ async function handleDriverDashboard(request, env, driver) {
   const paid    = commissions.filter(c=>c.status==='paid').reduce((s,c)=>s+c.driver_amount_cents,0);
   const recent  = commissions.slice(0,8);
 
+  // Pre-payment checklist
+  const step1Done = !!driver.contractor_agreed_at;
+  const step2Done = !!driver.w9_submitted_at || !!driver.w9_submitted;
+  const step3Done = !!(driver.payment_method_type || driver.payment_method);
+  const allStepsDone = step1Done && step2Done && step3Done;
+  const stepsHtml = !allStepsDone ? `<div class="dsec" style="border-color:#f59e0b40">
+  <h2>Required Before Payout</h2>
+  <div style="display:flex;flex-direction:column;gap:10px;margin-top:4px">
+    <div style="display:flex;align-items:center;gap:12px;padding:12px;background:${step1Done?'#00ff8808':'#1e1e2e'};border:1px solid ${step1Done?'#00ff8840':'#2e2e3e'};border-radius:10px">
+      <span style="font-size:20px">${step1Done?'✅':'1️⃣'}</span>
+      <div style="flex:1">
+        <div style="font-size:14px;font-weight:700;color:${step1Done?'var(--acc)':'var(--txt)'}">Contractor Agreement</div>
+        <div style="font-size:12px;color:var(--sub)">Sign the independent contractor agreement</div>
+      </div>
+      ${!step1Done?'<a href="/contractor" class="btn btn-sm btn-outline" style="font-size:12px;flex-shrink:0" target="_blank">Review &amp; Sign</a>':'<span style="color:var(--acc);font-size:13px;font-weight:700">Done</span>'}
+    </div>
+    <div style="display:flex;align-items:center;gap:12px;padding:12px;background:${step2Done?'#00ff8808':'#1e1e2e'};border:1px solid ${step2Done?'#00ff8840':'#2e2e3e'};border-radius:10px">
+      <span style="font-size:20px">${step2Done?'✅':'2️⃣'}</span>
+      <div style="flex:1">
+        <div style="font-size:14px;font-weight:700;color:${step2Done?'var(--acc)':'var(--txt)'}">W9 Tax Form</div>
+        <div style="font-size:12px;color:var(--sub)">Required for IRS reporting</div>
+      </div>
+      ${!step2Done?'<a href="/driver/w9" class="btn btn-sm btn-outline" style="font-size:12px;flex-shrink:0">Submit W9</a>':'<span style="color:var(--acc);font-size:13px;font-weight:700">Done</span>'}
+    </div>
+    <div style="display:flex;align-items:center;gap:12px;padding:12px;background:${step3Done?'#00ff8808':'#1e1e2e'};border:1px solid ${step3Done?'#00ff8840':'#2e2e3e'};border-radius:10px">
+      <span style="font-size:20px">${step3Done?'✅':'3️⃣'}</span>
+      <div style="flex:1">
+        <div style="font-size:14px;font-weight:700;color:${step3Done?'var(--acc)':'var(--txt)'}">Payment Method</div>
+        <div style="font-size:12px;color:var(--sub)">Set up how you want to get paid</div>
+      </div>
+      ${!step3Done?'<button class="btn btn-sm btn-outline" style="font-size:12px;flex-shrink:0" onclick="document.getElementById(\'pay-modal\').style.display=\'flex\'">Add Payment</button>':'<span style="color:var(--acc);font-size:13px;font-weight:700">Done</span>'}
+    </div>
+  </div>
+</div>` : '';
+
   return dashShell('Dashboard', 'dashboard', `
 <h1>Dashboard</h1>
 <p class="sub">Welcome back, ${driver.name}</p>
-${!driver.w9_submitted?'<div class="banner">⚠️ <a href="/driver/w9">Submit your W9</a> to receive payouts. Required before your first payment.</div>':''}
+${stepsHtml}
+<div id="pay-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:999;align-items:center;justify-content:center;padding:20px">
+<div style="background:var(--surf);border:1px solid var(--bdr);border-radius:20px;max-width:420px;width:100%;padding:28px">
+<h2 style="margin-bottom:16px">Set Payment Method</h2>
+<div class="msg-err" id="pay-err"></div>
+<div class="form-group"><label>Payment Type</label>
+<select id="pay-type" style="width:100%;background:#1e1e2e;border:1px solid var(--bdr);color:var(--txt);padding:10px 12px;border-radius:10px;font-size:14px">
+<option value="paypal">PayPal</option>
+<option value="zelle">Zelle</option>
+<option value="venmo">Venmo</option>
+<option value="check">Check (US Mail)</option>
+</select></div>
+<div class="form-group"><label>Email / Account / Address</label><input type="text" id="pay-detail" placeholder="Enter your PayPal email or account info"></div>
+<div style="display:flex;gap:10px;margin-top:16px">
+<button class="btn btn-sm" style="flex:1" onclick="savePayment()">Save Payment</button>
+<button class="btn btn-sm btn-outline" style="flex:1" onclick="document.getElementById(\'pay-modal\').style.display=\'none\'">Cancel</button>
+</div>
+</div></div>
 <div class="stats">
   <div class="stat"><div class="stat-n">${driverScans.length}</div><div class="stat-l">Scans</div></div>
   <div class="stat"><div class="stat-n">${commissions.filter(c=>c.conversion_id).length}</div><div class="stat-l">Conversions</div></div>
@@ -1154,7 +1220,19 @@ ${recent.length?`<div class="dsec">
     <td>${fmt$(c.driver_amount_cents)}</td>
     <td><span class="badge ${c.status==='paid'?'badge-green':c.status==='pending'?'badge-yellow':'badge-red'}">${c.status}</span></td>
   </tr>`).join('')}
-  </table></div>`:''}`);
+  </table></div>`:''}`,'',`<script>
+async function savePayment(){
+  const type=document.getElementById('pay-type').value;
+  const detail=document.getElementById('pay-detail').value.trim();
+  const err=document.getElementById('pay-err');
+  if(!detail){err.textContent='Please enter payment details';err.classList.add('show');return;}
+  const r=await fetch('/driver/set-payment',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({payment_method:type,payment_detail:detail})});
+  const d=await r.json();
+  if(d.ok){document.getElementById('pay-modal').style.display='none';location.reload();}
+  else{err.textContent=d.error||'Error saving payment';err.classList.add('show');}
+}
+</script>`);
 }
 
 // ─── QR CODES ───
@@ -1197,8 +1275,10 @@ ${trucks.length===0?'<div class="dsec"><p style="color:var(--sub)">No trucks ass
 <h2>Truck T${n} <span class="badge ${t.status==='active'?'badge-green':'badge-yellow'}" style="margin-left:8px">${t.status}</span></h2>
 <div style="text-align:center;margin:20px 0">${svg}</div>
 <p style="text-align:center;color:var(--sub);font-size:12px;margin-bottom:16px">${qrUrl}</p>
-<div style="display:flex;gap:10px;justify-content:center">
-<a href="data:image/svg+xml;charset=utf-8,${encodeURIComponent(QR_CODES['t'+n]||svg)}" download="QRPerks_T${n}.svg" class="btn btn-sm">Download QR Code →</a>
+<div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+<button class="btn btn-sm" onclick="downloadQR('t${n}','png')" style="font-size:12px">Download PNG</button>
+<button class="btn btn-sm btn-outline" onclick="downloadQR('t${n}','jpg')" style="font-size:12px">Download JPG</button>
+<button class="btn btn-sm btn-outline" onclick="downloadQR('t${n}','svg')" style="font-size:12px">Download SVG</button>
 </div></div>`;
   }).join('')}`,
 `<script>
@@ -1343,6 +1423,7 @@ async function handleDriverReferrals(request, env, driver) {
   <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
     <code style="background:#0f0f18;padding:10px 14px;border-radius:10px;font-size:13px;color:var(--acc);flex:1;min-width:200px;word-break:break-all">${refLink}</code>
     <button class="copy-btn" onclick="copyRef()">Copy</button>
+    <button class="copy-btn" onclick="shareRef()">Share</button>
   </div>
   <p style="color:var(--sub);font-size:13px;margin-top:16px">Referral earnings: <strong style="color:var(--acc)">${fmt$(totalRef)}</strong></p>
 </div>
@@ -1352,7 +1433,10 @@ async function handleDriverReferrals(request, env, driver) {
   ${referrals.map(r=>{const d=r.referred||{};const s=d.status||'pending';const bc=s==='active'?'badge-green':s==='pending'?'badge-yellow':'badge-red';return`<tr><td>${d.name||'Driver'}</td><td>${new Date(r.created_at).toLocaleDateString()}</td><td><span class="badge ${bc}">${s}</span></td></tr>`;}).join('')}
   </table>`:'<p style="color:var(--sub);font-size:13px">No referrals yet. Share your link to start earning.</p>'}
 </div>`,
-`<script>function copyRef(){navigator.clipboard.writeText('${refLink}');event.target.textContent='Copied!';setTimeout(()=>event.target.textContent='Copy',2000);}</script>`);
+`<script>
+function copyRef(){navigator.clipboard.writeText('${refLink}').then(()=>{event.target.textContent='Copied!';setTimeout(()=>event.target.textContent='Copy',2000);}).catch(()=>{});}
+function shareRef(){if(navigator.share){navigator.share({title:'Join QR Perks',text:'Earn passive income with QR Perks — join as a driver',url:'${refLink}'}).catch(()=>{});}else{copyRef();}}
+</script>`);
 }
 
 // ─── EARNINGS ───
@@ -1449,6 +1533,29 @@ async function handleDriverSettingsPost(request, env, driver) {
     }
     return jsonOk({ ok:false, error:'Unknown action' });
   } catch { return jsonOk({ ok:false, error:'Server error' }); }
+}
+
+// ─── PAYMENT METHOD ───
+async function handleDriverSetPayment(request, env, driver) {
+  try {
+    const body = await request.json();
+    const { payment_method, payment_detail } = body;
+    if (!payment_method || !payment_detail) return jsonOk({ ok:false, error:'Payment method and detail required' });
+    await sbPatch(env, 'drivers', `id=eq.${driver.id}`, { payment_method_type:payment_method, payment_method_detail_encrypted:payment_detail });
+    return jsonOk({ ok:true });
+  } catch(e) { return jsonOk({ ok:false, error:'Server error' }); }
+}
+
+// ─── CONTRACTOR ACCEPTANCE ───
+async function handleDriverAcceptContractor(request, env, driver) {
+  try {
+    const ip = request.headers.get('CF-Connecting-IP') || '';
+    await sbPatch(env, 'drivers', `id=eq.${driver.id}`, {
+      contractor_agreed_at: new Date().toISOString(),
+      contractor_agree_ip: ip
+    });
+    return jsonOk({ ok:true });
+  } catch(e) { return jsonOk({ ok:false, error:'Server error' }); }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1970,12 +2077,45 @@ function staticPage(slug) {
 <ul><li>Do not scan your own QR code</li><li>Do not post truck QR codes online</li><li>Do not engage in click fraud or incentivized traffic</li><li>Do not place QR codes on vehicles you don't own/operate</li></ul>
 <p>Violation = immediate termination + forfeiture of all unpaid commissions.</p>
 <h2>Governing Law</h2>
-<p>State of California.</p>`);
+<p>State of California.</p>
+<div id="ack-section" style="margin-top:32px;padding:20px;background:#0f0f18;border:1px solid #00ff8840;border-radius:14px">
+<p style="color:#f0f0f0;font-weight:700;margin-bottom:12px">Driver Acceptance</p>
+<p style="color:#8888aa;font-size:13px;margin-bottom:16px">By clicking below, you agree to this Independent Contractor Agreement as of today's date.</p>
+<div id="ack-ok" style="display:none;color:#00ff88;font-weight:700;margin-bottom:12px">✅ Agreement accepted! You may close this window.</div>
+<button id="ack-btn" onclick="acceptContractor()" style="background:#00ff88;color:#000;border:none;padding:14px 28px;border-radius:10px;font-weight:800;font-size:15px;cursor:pointer">I Accept This Agreement</button>
+<p style="color:#555;font-size:12px;margin-top:12px">You must be logged in as a driver. If you're not logged in, <a href="/driver/login" style="color:#00ff88">log in first</a>.</p>
+</div>
+<script>
+async function acceptContractor(){
+  const btn=document.getElementById('ack-btn');
+  btn.disabled=true;btn.textContent='Saving...';
+  try{
+    const r=await fetch('/driver/accept-contractor',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    const d=await r.json();
+    if(d.ok){document.getElementById('ack-ok').style.display='block';btn.style.display='none';}
+    else{btn.textContent='Error — try logging in first';btn.disabled=false;}
+  }catch{btn.textContent='Error — are you logged in?';btn.disabled=false;}
+}
+</script>`);
 
   if (slug==='unsubscribe') return legalShell('Unsubscribe', `
 <h1><span class="en">Unsubscribed</span><span class="es">Dado de Baja</span></h1>
 <p><span class="en">You've been removed from QR Perks email communications. To re-subscribe or for questions, email <a href="mailto:support@qr-perks.com">support@qr-perks.com</a>.</span>
 <span class="es">Has sido eliminado de las comunicaciones de correo de QR Perks. Para volver a suscribirte, escríbenos a <a href="mailto:support@qr-perks.com">support@qr-perks.com</a>.</span></p>`);
+
+  if (slug==='leads-terms') return legalShell('Consumer Data Terms', `
+<h1><span class="en">Consumer Data Terms</span><span class="es">Términos de Datos del Consumidor</span></h1>
+<p class="effective"><span class="en">Effective: January 1, 2025</span><span class="es">Vigente: 1 de enero de 2025</span></p>
+<h2><span class="en">Data Collection</span><span class="es">Recopilación de Datos</span></h2>
+<p><span class="en">By submitting your email address or phone number on this site, you consent to receiving offers and alerts from QR Perks and our advertising partners. Message frequency varies. Message &amp; data rates may apply.</span>
+<span class="es">Al enviar su correo electrónico o número de teléfono en este sitio, usted consiente recibir ofertas y alertas de QR Perks y nuestros socios publicitarios. La frecuencia de mensajes varía. Se pueden aplicar tarifas de mensajes y datos.</span></p>
+<h2><span class="en">Opt-Out</span><span class="es">Cancelar Suscripción</span></h2>
+<p><span class="en">You may unsubscribe at any time by clicking the unsubscribe link in any email or replying STOP to any SMS. To request deletion of your data, email <a href="mailto:privacy@qr-perks.com">privacy@qr-perks.com</a>.</span>
+<span class="es">Puede cancelar la suscripción en cualquier momento haciendo clic en el enlace de cancelación en cualquier correo electrónico o respondiendo STOP a cualquier SMS.</span></p>
+<h2><span class="en">Partner Sharing</span><span class="es">Compartir con Socios</span></h2>
+<p><span class="en">Your contact information may be shared with our affiliate marketing partners for the purpose of delivering relevant offers. We do not sell your data to unrelated third parties.</span>
+<span class="es">Su información de contacto puede ser compartida con nuestros socios de marketing de afiliados para entregar ofertas relevantes. No vendemos sus datos a terceros no relacionados.</span></p>
+<p><a href="mailto:privacy@qr-perks.com">privacy@qr-perks.com</a> · <a href="/privacy">Privacy Policy</a></p>`);
 
   return html404();
 }
