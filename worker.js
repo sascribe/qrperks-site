@@ -224,6 +224,7 @@ async function route(request, env, ctx) {
   if (path === '/api/email-capture' && method === 'POST')           return handleCapture(request, env);
   if (path === '/api/contact'    && method === 'POST')              return handleContactPost(request, env);
   if (path === '/api/stats'      && method === 'GET')               return handleApiStats(request, env);
+  if (path === '/api/truck-name' && method === 'POST')              return handleApiTruckName(request, env);
 
   // Landing page
   if (path === '/') return handleHome(request, env, ctx);
@@ -536,7 +537,7 @@ async function handleJoin(request, env) {
   const ref = new URL(request.url).searchParams.get('ref') || '';
   const redirectUrl = new URL(`/driver/signup?ref=${encodeURIComponent(ref)}`, request.url).toString();
   const resp = new Response(null, { status:302, headers:{ 'Location': redirectUrl } });
-  if (ref) resp.headers.set('Set-Cookie', `qrp_ref=${encodeURIComponent(ref)}; Path=/; Max-Age=86400; SameSite=Lax`);
+  if (ref) resp.headers.set('Set-Cookie', `qrp_ref=${encodeURIComponent(ref)}; Path=/; Max-Age=2592000; SameSite=Lax`);
   return resp;
 }
 
@@ -573,8 +574,34 @@ async function handleCapture(request, env) {
     const ip = request.headers.get('CF-Connecting-IP') || '';
     const ip_hash = await hashIp(ip);
     await sbPost(env, 'email_captures', { email:email||null, phone:phone||null, source:source||'web', offer_clicked:offer_clicked||null, ip_hash });
+    // Send confirmation email via Resend (fire and forget — thank you shows regardless)
+    if (email && env.RESEND_API_KEY) {
+      const emailPayload = {
+        from: 'QR Perks <noreply@qr-perks.com>',
+        to: [email],
+        subject: "You're on the list — QR Perks",
+        html: '<div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;background:#0f0f18;color:#e0e0e0;border-radius:12px"><h1 style="color:#00ff88;font-size:24px;margin-bottom:8px">You\'re in! \uD83C\uDF89</h1><p style="color:#aaa;font-size:16px;line-height:1.6">Thanks for signing up for QR Perks. You\'ll be first to know about exclusive deals delivered to your phone when you scan a QR-Perks truck.</p><p style="color:#aaa;font-size:14px;margin-top:24px">Keep an eye out -- deals are rolling out now.</p><p style="color:#555;font-size:12px;margin-top:32px">You received this because you signed up at qr-perks.com</p></div>'
+      };
+      const resendResp = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(emailPayload)
+      }).catch(() => null);
+      const resendStatus = resendResp ? resendResp.status : 0;
+      // Log send attempt to Supabase (non-blocking)
+      sbPost(env, 'email_captures', { email: null, phone: null, source: 'resend_log', offer_clicked: resendStatus === 200 ? 'sent' : 'failed', ip_hash }).catch(() => {});
+    }
     return jsonOk({ ok:true });
   } catch { return jsonOk({ ok:false }); }
+}
+
+async function handleApiTruckName(request, env) {
+  try {
+    const { truck_id, truck_name } = await request.json();
+    if (!truck_id) return jsonOk({ ok:false, error:'truck_id required' });
+    await sbPatch(env, 'trucks', `id=eq.${truck_id}`, { truck_name: truck_name||null });
+    return jsonOk({ ok:true });
+  } catch(e) { return jsonOk({ ok:false, error:e.message }); }
 }
 
 async function handleApiAffiliates(request, env) {
@@ -740,10 +767,13 @@ ${DS}
 <section class="hero">
   <h1><span class="en">Scan. <span class="acc">Save.</span> Score.</span><span class="es">Escanea. <span class="acc">Ahorra.</span> Gana.</span></h1>
   <p class="hero-sub"><span class="en">Exclusive deals delivered straight to your phone — just scan the QR code on the truck.</span><span class="es">Ofertas exclusivas directo a tu teléfono — solo escanea el código QR del camión.</span></p>
+  <div id="hero-capture-wrap">
   <form class="hero-form" onsubmit="heroCapture(event)">
     <input type="email" id="hero-email" name="email" required placeholder="Enter your email">
     <button type="submit" class="btn"><span class="en">Get My Deal</span><span class="es">Obtener Mi Oferta</span></button>
   </form>
+  <div id="hero-thankyou" style="display:none;text-align:center;padding:16px 0;color:var(--acc);font-size:16px;font-weight:600"><span class="en">✅ You're on the list! Check your inbox.</span><span class="es">✅ ¡Estás en la lista! Revisa tu bandeja de entrada.</span></div>
+  </div>
 </section>
 
 ${offerCard(featured)}
@@ -817,7 +847,7 @@ function openBridge(affiliateId, subId, nameEn, nameEs){
   const l=getLang();
   bridgeUrl='/go/'+affiliateId+'?t='+(TRUCK_ID||'web');
   const title=document.getElementById('br-title');
-  title.textContent=l==='en'?'You\'re headed to '+nameEn+'...':'Te dirigimos a '+nameEs+'...';
+  title.textContent=l==='en'?"You're headed to "+nameEn+"...":"Te dirigimos a "+nameEs+"...";
   document.getElementById('bridge').classList.add('show');
   const fill=document.getElementById('br-fill');
   setTimeout(()=>fill.style.width='100%',50);
@@ -841,8 +871,10 @@ function heroCapture(e){
   e.preventDefault();
   const email=document.getElementById('hero-email').value.trim();
   if(email){
-    fetch('/api/capture',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({email,source:TRUCK_ID||'hero',offer_clicked:'signup'})}).catch(()=>{});
+    fetch('/api/email-capture',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({email,source:TRUCK_ID||'hero',offer_clicked:'signup'})}).then(r=>r.json()).then(d=>{
+      if(d.ok){const w=document.getElementById('hero-capture-wrap');const ty=document.getElementById('hero-thankyou');if(w&&ty){w.querySelector('form').style.display='none';ty.style.display='block';}}
+    }).catch(()=>{});
   }
   // Show first offer after capture
   if(affiliates && affiliates.length) openBridge(affiliates[0],'hero','${(featured.prize_description||featured.name).replace(/'/g,"\\'")}','${(featured.prize_description_es||featured.name).replace(/'/g,"\\'")}');
@@ -1275,7 +1307,7 @@ async function savePayment(){
 
 // ─── QR CODES ───
 async function handleDriverQrCodes(request, env, driver) {
-  const trucks = await sbGet(env, 'trucks', `driver_id=eq.${driver.id}&select=id,status`);
+  const trucks = await sbGet(env, 'trucks', `driver_id=eq.${driver.id}&select=id,status,truck_name`);
   const needsAck = !driver.accepted_qr_rules_at;
   return dashShell('QR Codes', 'qr-codes', `
 ${needsAck?`<div id="rules-modal" style="position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:999;display:flex;align-items:center;justify-content:center;padding:20px">
@@ -1314,7 +1346,11 @@ ${trucks.length===0?'<div class="dsec"><p style="color:var(--sub)">No trucks ass
       ? `<img src="${QR_PNG_DATA['t'+n]}" alt="QR Code Truck T${n}" style="max-width:220px;border:2px solid #00ff8840;border-radius:12px;padding:6px;background:#fff" loading="lazy">`
       : svg;
     return `<div class="dsec">
-<h2>Truck T${n} <span class="badge ${t.status==='active'?'badge-green':'badge-yellow'}" style="margin-left:8px">${t.status}</span></h2>
+<h2>${t.truck_name||'Truck T'+n} <span class="badge ${t.status==='active'?'badge-green':'badge-yellow'}" style="margin-left:8px">${t.status}</span></h2>
+<div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+  <input type="text" id="tnm-${n}" value="${t.truck_name||''}" placeholder="e.g. Main Street Truck" style="flex:1;min-width:160px;max-width:280px;padding:6px 10px;font-size:13px;background:#1e1e2e;border:1px solid var(--bdr);color:var(--txt);border-radius:8px">
+  <button class="btn btn-sm btn-ghost" onclick="saveTruckName('t${n}','${n}')" style="font-size:12px">Save Name</button>
+</div>
 <div style="text-align:center;margin:20px 0">${imgHtml}</div>
 <p style="text-align:center;color:var(--sub);font-size:12px;margin-bottom:16px">${qrUrl}</p>
 <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
@@ -1330,18 +1366,32 @@ async function ackRules(){
   document.getElementById('rules-modal').style.display='none';
 }`:''}
 const QR_DATA=${JSON.stringify(Object.fromEntries(Object.entries(QR_PNG_DATA).filter(([k])=>trucks.some(t=>t.id===k))))};
+async function saveTruckName(truckId,n){
+  const val=document.getElementById('tnm-'+n).value.trim();
+  const r=await fetch('/api/truck-name',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({truck_id:truckId,truck_name:val||null})}).then(r=>r.json()).catch(()=>({ok:false}));
+  if(r.ok){const h=document.querySelector('#tnm-'+n).closest('.dsec').querySelector('h2');if(h)h.childNodes[0].textContent=(val||'Truck T'+n)+' ';}
+}
 function downloadQR(truckId,ext){
   const data=QR_DATA[truckId];
   const n=truckId.replace('t','');
   const filename='QR-Perks-T'+n+'.'+ext;
   if(ext==='svg'){
-    const svg='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300" width="300" height="300"><image href="'+(data||'')+'" x="0" y="0" width="300" height="300"/></svg>';
+    const svg='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="400" height="400"><image href="'+(data||'')+'" x="0" y="0" width="400" height="400"/></svg>';
     const blob=new Blob([svg],{type:'image/svg+xml'});
-    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=filename;a.click();
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');a.href=url;a.download=filename;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(url);a.remove();},100);
     return;
   }
   if(!data){alert('QR code not available for download');return;}
-  const a=document.createElement('a');a.href=data;a.download=filename;a.click();
+  const b64=data.split(',')[1]||data;
+  const bin=atob(b64);
+  const bytes=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
+  const mime=ext==='png'?'image/png':'image/jpeg';
+  const blob=new Blob([bytes],{type:mime});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;a.download=filename;document.body.appendChild(a);a.click();
+  setTimeout(()=>{URL.revokeObjectURL(url);a.remove();},100);
 }
 </script>`);
 }
@@ -1477,7 +1527,7 @@ async function handleDriverReferrals(request, env, driver) {
 <div class="dsec">
   <h2>Your Referral Link</h2>
   <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-    <code style="background:#0f0f18;padding:10px 14px;border-radius:10px;font-size:13px;color:var(--acc);flex:1;min-width:200px;word-break:break-all">${refLink}</code>
+    <a href="${refLink}" target="_blank" rel="noopener" style="flex:1;min-width:200px;text-decoration:none"><code style="background:#0f0f18;padding:10px 14px;border-radius:10px;font-size:13px;color:var(--acc);display:block;word-break:break-all">${refLink}</code></a>
     <button class="copy-btn" onclick="copyRef()">Copy</button>
     <button class="copy-btn" onclick="shareRef()">Share</button>
   </div>
@@ -1485,12 +1535,13 @@ async function handleDriverReferrals(request, env, driver) {
 </div>
 <div class="dsec">
   <h2>Referred Drivers (${referrals.length})</h2>
-  ${referrals.length?`<table><tr><th>Name</th><th>Joined</th><th>Status</th></tr>
-  ${referrals.map(r=>{const d=r.referred||{};const s=d.status||'pending';const bc=s==='active'?'badge-green':s==='pending'?'badge-yellow':'badge-red';return`<tr><td>${d.name||'Driver'}</td><td>${new Date(r.created_at).toLocaleDateString()}</td><td><span class="badge ${bc}">${s}</span></td></tr>`;}).join('')}
+  ${referrals.length?`<table><tr><th>Company</th><th>Joined</th><th>Status</th><th>Commission Earned</th></tr>
+  ${referrals.map(r=>{const d=r.referred||{};const s=d.status||'pending';const bc=s==='active'?'badge-green':s==='pending'?'badge-yellow':'badge-red';const earned=refEarnings.filter(e=>true).reduce((sum,e)=>sum,0);return`<tr><td>${d.name||'Driver'}</td><td>${new Date(r.created_at).toLocaleDateString()}</td><td><span class="badge ${bc}">${s}</span></td><td style="color:var(--acc)">${r.commission_earned_cents!=null?fmt$(r.commission_earned_cents):'—'}</td></tr>`;}).join('')}
   </table>`:'<p style="color:var(--sub);font-size:13px">No referrals yet. Share your link to start earning.</p>'}
 </div>`,
 `<script>
-function copyRef(){navigator.clipboard.writeText('${refLink}').then(()=>{event.target.textContent='Copied!';setTimeout(()=>event.target.textContent='Copy',2000);}).catch(()=>{});}
+function copyRef(){const btn=event.target;const txt='${refLink}';if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(txt).then(()=>{btn.textContent='Copied!';setTimeout(()=>btn.textContent='Copy',2000);}).catch(()=>fallbackCopy(txt,btn));}else{fallbackCopy(txt,btn);}}
+function fallbackCopy(txt,btn){const el=document.createElement('textarea');el.value=txt;el.style.position='fixed';el.style.opacity='0';document.body.appendChild(el);el.select();try{document.execCommand('copy');btn.textContent='Copied!';setTimeout(()=>btn.textContent='Copy',2000);}catch(e){}el.remove();}
 function shareRef(){if(navigator.share){navigator.share({title:'Join QR Perks',text:'Earn passive income with QR Perks — join as a driver',url:'${refLink}'}).catch(()=>{});}else{copyRef();}}
 </script>`);
 }
@@ -1745,7 +1796,7 @@ async function handleAdminDashboard(request, env) {
       sbGet(env, 'affiliates', 'select=*&order=display_order.asc'),
       sbGet(env, 'email_captures', 'select=*&order=created_at.desc&limit=100'),
       sbGet(env, 'w9_submissions', 'select=id,driver_id,created_at,reviewed&order=created_at.desc'),
-      sbGet(env, 'trucks', 'select=id,driver_id,status&order=id.asc&limit=20'),
+      sbGet(env, 'trucks', 'select=id,driver_id,status,truck_name&order=id.asc&limit=20'),
     ]);
   } catch(e) { console.error('Admin dashboard fetch error:', e.message); }
 
@@ -1789,9 +1840,10 @@ ${drivers.map(drRow).join('')||'<tr><td colspan="6" style="color:var(--sub);padd
 
 <div class="asec" id="trucks">
 <h2>Truck Assignments</h2>
-<table><tr><th>Truck</th><th>Assigned Driver</th><th>Status</th><th style="text-align:right">Action</th></tr>
+<table><tr><th>Truck</th><th>Name</th><th>Assigned Driver</th><th>Status</th><th style="text-align:right">Action</th></tr>
 ${trucks.map(t=>{const drv=drivers.find(d=>d.id===t.driver_id);return`<tr>
 <td>${t.id.toUpperCase()}</td>
+<td style="color:var(--sub);font-size:13px">${t.truck_name||'—'}</td>
 <td>${drv?drv.name+' ('+drv.email+')':`<span style="color:var(--sub)">Unassigned</span>`}</td>
 <td><span class="badge ${t.status==='active'?'badge-green':'badge-yellow'}">${t.status}</span></td>
 <td style="text-align:right">
@@ -1803,7 +1855,7 @@ ${drivers.filter(d=>d.status==='active').map(d=>`<option value="${d.id}" ${t.dri
 </select>
 <button class="btn btn-sm btn-ghost" style="font-size:11px">Assign</button>
 </form>
-</td></tr>`;}).join('')||'<tr><td colspan="4" style="color:var(--sub);padding:12px 0">No trucks</td></tr>'}
+</td></tr>`;}).join('')||'<tr><td colspan="5" style="color:var(--sub);padding:12px 0">No trucks</td></tr>'}
 </table></div>
 
 <div class="asec" id="w9">
