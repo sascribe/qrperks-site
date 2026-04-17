@@ -223,8 +223,10 @@ async function route(request, env, ctx) {
   if (path === '/api/capture'    && method === 'POST')              return handleCapture(request, env);
   if (path === '/api/email-capture' && method === 'POST')           return handleCapture(request, env);
   if (path === '/api/contact'    && method === 'POST')              return handleContactPost(request, env);
-  if (path === '/api/stats'      && method === 'GET')               return handleApiStats(request, env);
-  if (path === '/api/truck-name' && method === 'POST')              return handleApiTruckName(request, env);
+  if (path === '/api/stats'        && method === 'GET')               return handleApiStats(request, env);
+  if (path === '/api/truck-name'   && method === 'POST')              return handleApiTruckName(request, env);
+  if (path === '/api/save-qr-code' && method === 'POST')              return handleSaveQrCode(request, env);
+  if (path === '/api/sms-webhook'  && method === 'POST')              return handleSmsWebhook(request, env);
 
   // Landing page
   if (path === '/') return handleHome(request, env, ctx);
@@ -240,7 +242,7 @@ async function route(request, env, ctx) {
   if (path === '/contact')             return handleContactPage(request, env);
   if (path === '/contractor')          return staticPage('contractor');
   if (path === '/leads-terms')         return staticPage('leads-terms');
-  if (path === '/unsubscribe')         return staticPage('unsubscribe');
+  if (path === '/unsubscribe')         return handleUnsubscribe(request, env);
 
   return html404();
 }
@@ -382,6 +384,15 @@ async function sbPatch(env, table, filter, data) {
 
 async function sendEmail(env, { to, subject, html, template_name }) {
   try {
+    // Check unsubscribed status for subscriber (non-driver-system) emails
+    const subscriberTemplates = ['welcome','newsletter','promo'];
+    if (subscriberTemplates.includes(template_name)) {
+      const rec = await sbGetOne(env, 'email_captures', `email=eq.${encodeURIComponent(to)}&select=status`);
+      if (rec && rec.status === 'unsubscribed') {
+        console.log('Skipping email to unsubscribed:', to);
+        return null;
+      }
+    }
     const res = await fetch('https://api.resend.com/emails', {
       method:'POST',
       headers:{'Authorization':`Bearer ${env.RESEND_API_KEY}`,'Content-Type':'application/json'},
@@ -399,7 +410,11 @@ async function sendEmail(env, { to, subject, html, template_name }) {
   }
 }
 
-const emailBase = (content) => `<!DOCTYPE html><html><head><meta charset="UTF-8">
+const emailBase = (content, recipientEmail='') => {
+  const unsubLink = recipientEmail
+    ? `https://qr-perks.com/unsubscribe?email=${encodeURIComponent(recipientEmail)}`
+    : 'https://qr-perks.com/unsubscribe';
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 body{margin:0;padding:0;background:#0a0a0f;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#f0f0f0}
@@ -420,8 +435,9 @@ a{color:#00ff88}
 ${content}
 <hr>
 <p class="dim">QR Perks · qr-perks.com<br>
-<a href="https://qr-perks.com/unsubscribe" style="color:#444">Unsubscribe</a></p>
+<a href="${unsubLink}" style="color:#444">Unsubscribe</a></p>
 </div></body></html>`;
+};
 
 function emailWelcome(driver) {
   return emailBase(`<div class="card">
@@ -434,7 +450,7 @@ function emailWelcome(driver) {
 <p><strong>Your referral link:</strong></p>
 <code>https://qr-perks.com/join?ref=${driver.referral_code}</code>
 <p style="font-size:13px;color:#555">⚠️ Place QR codes on your truck only. Do not post online. Do not scan your own code.</p>
-</div>`);
+</div>`, driver.email);
 }
 
 function emailVerification(driver, token) {
@@ -445,10 +461,10 @@ function emailVerification(driver, token) {
 <p>Hi ${driver.name}, thanks for signing up. Click below to verify your email — then an admin will review and activate your account.</p>
 <a href="${link}" class="btn">Verify My Email →</a>
 <p class="dim">Link expires in 24 hours.</p>
-</div>`);
+</div>`, driver.email);
 }
 
-function emailPasswordReset(token) {
+function emailPasswordReset(token, recipientEmail='') {
   const link = `https://qr-perks.com/driver/reset?token=${token}`;
   return emailBase(`<div class="card">
 <div class="tag">PASSWORD RESET</div>
@@ -456,7 +472,7 @@ function emailPasswordReset(token) {
 <p>Click below to set a new password. If you didn't request this, ignore this email.</p>
 <a href="${link}" class="btn">Reset Password →</a>
 <p class="dim">Link expires in 1 hour.</p>
-</div>`);
+</div>`, recipientEmail);
 }
 
 function emailW9Confirmation(driver) {
@@ -465,7 +481,7 @@ function emailW9Confirmation(driver) {
 <h1>W9 On File — Thank You</h1>
 <p>Hi ${driver.name}, we've received your W9. You'll receive payouts on the 1st of each month once earnings reach the $25 minimum.</p>
 <a href="https://qr-perks.com/driver/earnings" class="btn">View Earnings →</a>
-</div>`);
+</div>`, driver.email);
 }
 
 function emailReferralSignup(referrer, newName) {
@@ -474,7 +490,7 @@ function emailReferralSignup(referrer, newName) {
 <h1>Someone joined your team!</h1>
 <p>Hi ${referrer.name}, <strong>${newName}</strong> just signed up using your referral link. Once their account is active and generating conversions, you'll earn <strong>10%</strong> automatically.</p>
 <a href="https://qr-perks.com/driver/referrals" class="btn">View Referrals →</a>
-</div>`);
+</div>`, referrer.email);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -569,27 +585,45 @@ async function handleGo(request, env, path) {
 async function handleCapture(request, env) {
   try {
     const body = await request.json();
-    const { email, phone, source, offer_clicked } = body;
+    const { email, phone, source, offer_clicked, lang } = body;
     if (!email && !phone) return jsonOk({ ok:false });
     const ip = request.headers.get('CF-Connecting-IP') || '';
     const ip_hash = await hashIp(ip);
-    await sbPost(env, 'email_captures', { email:email||null, phone:phone||null, source:source||'web', offer_clicked:offer_clicked||null, ip_hash });
-    // Send confirmation email via Resend (fire and forget — thank you shows regardless)
+
+    // Check if already unsubscribed
+    if (email) {
+      const existing = await sbGetOne(env, 'email_captures', `email=eq.${encodeURIComponent(email)}&select=status`);
+      if (existing && existing.status === 'unsubscribed') return jsonOk({ ok:true }); // silently skip
+    }
+
+    await sbPost(env, 'email_captures', { email:email||null, phone:phone||null, source:source||'web', offer_clicked:offer_clicked||null, ip_hash, lang:lang||null });
+
+    // Send welcome email via Resend
     if (email && env.RESEND_API_KEY) {
-      const emailPayload = {
-        from: 'QR Perks <noreply@qr-perks.com>',
-        to: [email],
-        subject: "You're on the list — QR Perks",
-        html: '<div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;background:#0f0f18;color:#e0e0e0;border-radius:12px"><h1 style="color:#00ff88;font-size:24px;margin-bottom:8px">You\'re in! \uD83C\uDF89</h1><p style="color:#aaa;font-size:16px;line-height:1.6">Thanks for signing up for QR Perks. You\'ll be first to know about exclusive deals delivered to your phone when you scan a QR-Perks truck.</p><p style="color:#aaa;font-size:14px;margin-top:24px">Keep an eye out -- deals are rolling out now.</p><p style="color:#555;font-size:12px;margin-top:32px">You received this because you signed up at qr-perks.com</p></div>'
-      };
-      const resendResp = await fetch('https://api.resend.com/emails', {
+      const detectedLang = lang || 'en';
+      const unsubLink = `https://qr-perks.com/unsubscribe?email=${encodeURIComponent(email)}`;
+      const htmlEn = emailBase(`<div class="card">
+<div class="tag">✅ YOU'RE IN</div>
+<h1>You're in! ✅</h1>
+<p>Welcome to the <strong>QR Perks insider list</strong>.</p>
+<p>You'll receive <strong>exclusive deals and offers sent directly to you</strong> — periodically, straight to your inbox. You don't need to scan a truck to get deals. <strong>The deals come to you.</strong></p>
+<p>Watch your inbox — great offers are on the way.</p>
+<p style="font-size:12px;color:#555;margin-top:24px">You signed up at qr-perks.com. Message frequency varies.</p>
+</div>`, email);
+      const htmlEs = emailBase(`<div class="card">
+<div class="tag">✅ YA ESTÁS ADENTRO</div>
+<h1>¡Ya estás adentro! ✅</h1>
+<p>Bienvenido a la <strong>lista insider de QR Perks</strong>.</p>
+<p>Recibirás <strong>ofertas y descuentos exclusivos enviados directamente a ti</strong> — periódicamente, directo a tu bandeja de entrada. No necesitas escanear un camión para recibir ofertas. <strong>Las ofertas llegan a ti.</strong></p>
+<p>Revisa tu bandeja de entrada — excelentes ofertas están en camino.</p>
+<p style="font-size:12px;color:#555;margin-top:24px">Te registraste en qr-perks.com. La frecuencia de mensajes varía.</p>
+</div>`, email);
+      const emailHtml = detectedLang === 'es' ? htmlEs : htmlEn;
+      fetch('https://api.resend.com/emails', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(emailPayload)
-      }).catch(() => null);
-      const resendStatus = resendResp ? resendResp.status : 0;
-      // Log send attempt to Supabase (non-blocking)
-      sbPost(env, 'email_captures', { email: null, phone: null, source: 'resend_log', offer_clicked: resendStatus === 200 ? 'sent' : 'failed', ip_hash }).catch(() => {});
+        body: JSON.stringify({ from:'QR Perks <noreply@qr-perks.com>', to:[email], subject:"You're In ✅ — QR Perks", html:emailHtml })
+      }).catch(() => {});
     }
     return jsonOk({ ok:true });
   } catch { return jsonOk({ ok:false }); }
@@ -730,7 +764,7 @@ ${DS}
 #bridge.show{display:flex}
 .br-title{font-size:20px;font-weight:800;margin-bottom:6px;max-width:340px}
 .br-prog{width:100%;max-width:320px;height:3px;background:#1e1e2e;border-radius:2px;overflow:hidden;margin:20px 0}
-.br-fill{height:100%;background:var(--acc);width:0;transition:width 5s linear}
+.br-fill{height:100%;background:var(--acc);width:0;transition:width 8s linear}
 .br-sub{color:var(--sub);font-size:14px;margin-bottom:24px;max-width:320px}
 .br-form{width:100%;max-width:360px;display:flex;flex-direction:column;gap:10px}
 .br-form input{background:#1e1e2e;border-color:#2e2e4e}
@@ -752,12 +786,12 @@ ${DS}
     <input type="email" id="br-email" autocomplete="email">
     <input type="tel" id="br-phone" autocomplete="tel">
     <button class="br-btn" id="br-alert"><span class="en">Alert Me + Continue →</span><span class="es">Notifícarme + Continuar →</span></button>
-    <button class="br-skip" id="br-skip"><span class="en">No thanks, take me there →</span><span class="es">No gracias, ir a la oferta →</span></button>
+    <button class="br-skip" id="br-skip"><span class="en">No Thank You — take me to the offer →</span><span class="es">No Gracias — llevarme a la oferta →</span></button>
   </div>
 </div>
 
 <header class="hdr">
-  <div class="logo">QR PERKS</div>
+  <a href="/" class="logo" style="text-decoration:none">QR PERKS</a>
   <div style="display:flex;align-items:center;gap:10px">
     <a href="/driver" class="btn-outline btn btn-sm" style="min-height:36px;padding:0 14px;font-size:13px;text-decoration:none"><span class="en">Driver Login</span><span class="es">Acceso Conductores</span></a>
     <div class="lang-toggle"><button class="lang-btn" id="lang-en" onclick="setLang('en')">EN</button><button class="lang-btn" id="lang-es" onclick="setLang('es')">ES</button></div>
@@ -824,7 +858,8 @@ ${loans.map(a=>offerCard(a, true)).join('')}
 
 <script>
 const TRUCK_ID = ${JSON.stringify(truckId)};
-let bridgeUrl = null, autoTimer = null;
+let bridgeUrl = null, autoTimer = null, pauseResumeTimer = null, bridgePaused = false;
+const BRIDGE_SECS = 8;
 
 function getLang(){const s=localStorage.getItem('qrp-lang');if(s)return s;return(navigator.language||'').startsWith('es')?'es':'en';}
 function setLang(l){
@@ -843,41 +878,95 @@ function setLang(l){
 }
 setLang(getLang());
 
+function hasLeadCapture(){
+  if(localStorage.getItem('qrp_lead_captured')==='true') return true;
+  const ck=document.cookie.split(';').find(c=>c.trim().startsWith('qrp_lead_captured='));
+  return !!(ck && ck.split('=')[1]==='true');
+}
+function setLeadCapture(){
+  localStorage.setItem('qrp_lead_captured','true');
+  const exp=new Date(Date.now()+30*24*60*60*1000).toUTCString();
+  document.cookie='qrp_lead_captured=true; path=/; expires='+exp+'; SameSite=Lax';
+}
+
+let timerStart=null, timerRemaining=BRIDGE_SECS*1000;
+function startBridgeTimer(){
+  const fill=document.getElementById('br-fill');
+  clearTimeout(autoTimer);
+  bridgePaused=false;
+  timerStart=Date.now();
+  fill.style.transition='width '+(timerRemaining/1000)+'s linear';
+  setTimeout(()=>fill.style.width='100%',20);
+  autoTimer=setTimeout(()=>doRedirect(),timerRemaining);
+}
+function pauseBridgeTimer(){
+  if(bridgePaused) return;
+  bridgePaused=true;
+  clearTimeout(autoTimer);
+  timerRemaining=Math.max(0, timerRemaining-(Date.now()-timerStart));
+  const fill=document.getElementById('br-fill');
+  fill.style.transition='none';
+  const pct=(BRIDGE_SECS*1000-timerRemaining)/(BRIDGE_SECS*1000)*100;
+  fill.style.width=pct+'%';
+}
+function scheduleResume(){
+  clearTimeout(pauseResumeTimer);
+  pauseResumeTimer=setTimeout(()=>{if(bridgePaused){timerStart=Date.now();startBridgeTimer();}},3000);
+}
+
 function openBridge(affiliateId, subId, nameEn, nameEs){
+  // If user already submitted homepage form, skip interstitial entirely
+  if(hasLeadCapture()){window.location.href='/go/'+affiliateId+'?t='+(TRUCK_ID||'web');return;}
   const l=getLang();
   bridgeUrl='/go/'+affiliateId+'?t='+(TRUCK_ID||'web');
   const title=document.getElementById('br-title');
   title.textContent=l==='en'?"You're headed to "+nameEn+"...":"Te dirigimos a "+nameEs+"...";
   document.getElementById('bridge').classList.add('show');
-  const fill=document.getElementById('br-fill');
-  setTimeout(()=>fill.style.width='100%',50);
-  clearTimeout(autoTimer);
-  autoTimer=setTimeout(()=>doRedirect(),5000);
+  timerRemaining=BRIDGE_SECS*1000;
+  startBridgeTimer();
+
+  // Pause on input focus, resume 3s after inactivity
+  ['br-email','br-phone'].forEach(id=>{
+    const inp=document.getElementById(id);
+    if(!inp) return;
+    inp.addEventListener('focus',()=>{pauseBridgeTimer();},{ capture:true });
+    inp.addEventListener('blur',()=>scheduleResume(),{ capture:true });
+    inp.addEventListener('input',()=>{pauseBridgeTimer();scheduleResume();},{ capture:true });
+  });
+
   document.getElementById('br-alert').onclick=async()=>{
-    clearTimeout(autoTimer);
+    clearTimeout(autoTimer); clearTimeout(pauseResumeTimer);
     const email=document.getElementById('br-email').value.trim();
     const phone=document.getElementById('br-phone').value.trim();
     if(email||phone){
+      const lang=getLang();
       fetch('/api/capture',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({email,phone,source:TRUCK_ID||'web',offer_clicked:affiliateId})}).catch(()=>{});
+        body:JSON.stringify({email,phone,source:TRUCK_ID||'web',offer_clicked:affiliateId,lang})}).catch(()=>{});
+      if(email) setLeadCapture();
     }
     doRedirect();
   };
-  document.getElementById('br-skip').onclick=()=>{clearTimeout(autoTimer);doRedirect();};
+  document.getElementById('br-skip').onclick=()=>{clearTimeout(autoTimer);clearTimeout(pauseResumeTimer);doRedirect();};
 }
-function closeBridge(){clearTimeout(autoTimer);document.getElementById('bridge').classList.remove('show');document.getElementById('br-fill').style.width='0';}
-function doRedirect(){if(bridgeUrl)window.open(bridgeUrl,'_blank');closeBridge();}
+function closeBridge(){clearTimeout(autoTimer);clearTimeout(pauseResumeTimer);document.getElementById('bridge').classList.remove('show');document.getElementById('br-fill').style.width='0';bridgePaused=false;timerRemaining=BRIDGE_SECS*1000;}
+function doRedirect(){if(bridgeUrl){window.location.href=bridgeUrl;}closeBridge();}
 function heroCapture(e){
   e.preventDefault();
   const email=document.getElementById('hero-email').value.trim();
-  if(email){
-    fetch('/api/email-capture',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({email,source:TRUCK_ID||'hero',offer_clicked:'signup'})}).then(r=>r.json()).then(d=>{
-      if(d.ok){const w=document.getElementById('hero-capture-wrap');const ty=document.getElementById('hero-thankyou');if(w&&ty){w.querySelector('form').style.display='none';ty.style.display='block';}}
-    }).catch(()=>{});
-  }
-  // Show first offer after capture
-  if(affiliates && affiliates.length) openBridge(affiliates[0],'hero','${(featured.prize_description||featured.name).replace(/'/g,"\\'")}','${(featured.prize_description_es||featured.name).replace(/'/g,"\\'")}');
+  if(!email) return;
+  const lang=getLang();
+  fetch('/api/email-capture',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({email,source:TRUCK_ID||'hero',offer_clicked:'signup',lang})}).then(r=>r.json()).then(d=>{
+    if(d.ok){
+      setLeadCapture();
+      const w=document.getElementById('hero-capture-wrap');const ty=document.getElementById('hero-thankyou');
+      if(w&&ty){w.querySelector('form').style.display='none';ty.style.display='block';}
+      // Go directly to first offer — no interstitial since they just submitted the form
+      if(affiliates && affiliates.length){
+        setTimeout(()=>{window.location.href='/go/'+affiliates[0].id+'?t='+(TRUCK_ID||'web');},1500);
+      }
+    }
+  }).catch(()=>{});
 }
 const affiliates=${JSON.stringify(affiliates.map(a=>({id:a.id,prize_description:a.prize_description,prize_description_es:a.prize_description_es,name:a.name})))};
 </script>
@@ -905,7 +994,7 @@ body{display:flex;align-items:center;justify-content:center;min-height:100vh;pad
 .btn-full{width:100%;margin-top:4px}
 </style></head><body>
 <div class="auth-wrap">
-  <div class="auth-logo">QR PERKS</div>
+  <a href="/" class="auth-logo" style="text-decoration:none;color:var(--acc)">QR PERKS</a>
   <div class="auth-card">
     ${content}
   </div>
@@ -1086,7 +1175,7 @@ async function handleDriverForgotPost(request, env) {
     if (driver) {
       const token = genToken(32);
       await sbPost(env, 'password_resets', { driver_id:driver.id, token, expires_at:new Date(Date.now()+3600000).toISOString() });
-      await sendEmail(env, { to:email, subject:'Reset your QR Perks password', html:emailPasswordReset(token), template_name:'password_reset' });
+      await sendEmail(env, { to:email, subject:'Reset your QR Perks password', html:emailPasswordReset(token, email), template_name:'password_reset' });
     }
     return jsonOk({ ok:true });
   } catch { return jsonOk({ ok:true }); }
@@ -1181,7 +1270,7 @@ code-block{background:#0f0f18;padding:12px 16px;border-radius:10px;display:block
 .copy-btn:hover{border-color:var(--acc);color:var(--acc)}
 </style></head><body>
 <nav class="dnav">
-  <span class="dnav-logo">QRP</span>
+  <a href="/" class="dnav-logo" style="text-decoration:none;color:var(--acc)">QRP</a>
   ${[['dashboard','Dashboard'],['qr-codes','QR Codes'],['earnings','Earnings'],['referrals','Referrals'],['w9','W9'],['settings','Settings']].map(([p,l])=>`<a href="/driver/${p}" class="${active===p?'active':''}">${l}</a>`).join('')}
   <form action="/driver/logout" method="POST" style="display:flex;margin-left:auto">
     <button type="submit" class="dnav-logout">Logout</button>
@@ -1307,8 +1396,32 @@ async function savePayment(){
 
 // ─── QR CODES ───
 async function handleDriverQrCodes(request, env, driver) {
-  const trucks = await sbGet(env, 'trucks', `driver_id=eq.${driver.id}&select=id,status,truck_name`);
+  const trucks = await sbGet(env, 'trucks', `driver_id=eq.${driver.id}&select=id,status,truck_name,qr_code_svg`);
   const needsAck = !driver.accepted_qr_rules_at;
+
+  // For each truck t9+, generate QR SVG if not in DB or pre-embedded
+  const truckSvgMap = {};
+  for (const t of trucks) {
+    const n = parseInt(t.id.replace('t',''), 10);
+    if (QR_PNG_DATA['t'+n]) {
+      truckSvgMap[t.id] = { type:'png', data: QR_PNG_DATA['t'+n] };
+    } else if (QR_CODES['t'+n]) {
+      truckSvgMap[t.id] = { type:'svg', data: QR_CODES['t'+n] };
+    } else if (t.qr_code_svg) {
+      truckSvgMap[t.id] = { type:'gensvg', data: t.qr_code_svg };
+    } else {
+      // Auto-generate for t9+
+      const url = `https://qr-perks.com/${t.id}`;
+      const generatedSvg = generateQRSvg(url);
+      truckSvgMap[t.id] = { type:'gensvg', data: generatedSvg, saveToDb: true };
+    }
+  }
+
+  const testNotice = `<div style="background:#00ff8808;border:1px solid #00ff8830;border-radius:10px;padding:12px 16px;margin-top:16px;font-size:13px;color:#00ff8899">
+<strong style="color:#00ff88">EN:</strong> Please scan and test your QR code before sending to print to confirm it routes correctly to your offer page.<br>
+<strong style="color:#00ff88">ES:</strong> Por favor escanea y prueba tu código QR antes de enviarlo a imprimir para confirmar que dirige correctamente a tu página de ofertas.
+</div>`;
+
   return dashShell('QR Codes', 'qr-codes', `
 ${needsAck?`<div id="rules-modal" style="position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:999;display:flex;align-items:center;justify-content:center;padding:20px">
 <div style="background:var(--surf);border:1px solid var(--bdr);border-radius:20px;max-width:520px;width:100%;max-height:90vh;overflow-y:auto;padding:28px">
@@ -1340,24 +1453,34 @@ ${trucks.length===0?'<div class="dsec"><p style="color:var(--sub)">No trucks ass
   trucks.map(t=>{
     const n=t.id.replace('t','');
     const qrUrl=`https://qr-perks.com/${t.id}`;
-    const svg=qrPlaceholder(n);
-    const hasPng = !!QR_PNG_DATA['t'+n];
-    const imgHtml = hasPng
-      ? `<img src="${QR_PNG_DATA['t'+n]}" alt="QR Code Truck T${n}" style="max-width:220px;border:2px solid #00ff8840;border-radius:12px;padding:6px;background:#fff" loading="lazy">`
-      : svg;
-    return `<div class="dsec">
+    const qrEntry = truckSvgMap[t.id];
+    let imgHtml='', dataAttr='', typeAttr='';
+    if(qrEntry){
+      typeAttr=qrEntry.type;
+      if(qrEntry.type==='png'){
+        imgHtml=`<img src="${qrEntry.data}" alt="QR Code Truck T${n}" style="max-width:220px;border:2px solid #00ff8840;border-radius:12px;padding:6px;background:#fff" loading="lazy">`;
+        dataAttr=qrEntry.data;
+      } else {
+        imgHtml=`<div style="background:white;border:2px solid #00ff8840;border-radius:12px;padding:12px;display:inline-block;max-width:220px">${qrEntry.data}</div>`;
+        dataAttr=qrEntry.data;
+      }
+    }
+    return `<div class="dsec" data-truck="${t.id}">
 <h2>${t.truck_name||'Truck T'+n} <span class="badge ${t.status==='active'?'badge-green':'badge-yellow'}" style="margin-left:8px">${t.status}</span></h2>
 <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
   <input type="text" id="tnm-${n}" value="${t.truck_name||''}" placeholder="e.g. Main Street Truck" style="flex:1;min-width:160px;max-width:280px;padding:6px 10px;font-size:13px;background:#1e1e2e;border:1px solid var(--bdr);color:var(--txt);border-radius:8px">
   <button class="btn btn-sm btn-ghost" onclick="saveTruckName('t${n}','${n}')" style="font-size:12px">Save Name</button>
 </div>
-<div style="text-align:center;margin:20px 0">${imgHtml}</div>
+<div style="text-align:center;margin:20px 0" id="qrimg-${n}">${imgHtml}</div>
 <p style="text-align:center;color:var(--sub);font-size:12px;margin-bottom:16px">${qrUrl}</p>
 <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
-<button class="btn btn-sm" onclick="downloadQR('t${n}','png')" style="font-size:12px">Download PNG</button>
-<button class="btn btn-sm btn-outline" onclick="downloadQR('t${n}','jpg')" style="font-size:12px">Download JPG</button>
-<button class="btn btn-sm btn-outline" onclick="downloadQR('t${n}','svg')" style="font-size:12px">Download SVG</button>
-</div></div>`;
+<button class="btn btn-sm" onclick="downloadQR('t${n}','svg')" style="font-size:12px">⬇ SVG</button>
+<button class="btn btn-sm btn-outline" onclick="downloadQR('t${n}','pdf')" style="font-size:12px">⬇ PDF</button>
+<button class="btn btn-sm btn-outline" onclick="downloadQR('t${n}','jpeg')" style="font-size:12px">⬇ JPEG</button>
+<button class="btn btn-sm btn-outline" onclick="downloadQR('t${n}','png')" style="font-size:12px">⬇ PNG</button>
+</div>
+${testNotice}
+</div>`;
   }).join('')}`,
 `<script>
 ${needsAck?`document.getElementById('rck').addEventListener('change',function(){document.getElementById('rck-btn').disabled=!this.checked;});
@@ -1365,54 +1488,139 @@ async function ackRules(){
   await fetch('/driver/qr-codes',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}).catch(()=>{});
   document.getElementById('rules-modal').style.display='none';
 }`:''}
-const QR_DATA=${JSON.stringify(Object.fromEntries(Object.entries(QR_PNG_DATA).filter(([k])=>trucks.some(t=>t.id===k))))};
+
+// QR data map: truck_id → {type, data, saveToDb}
+const QR_MAP=${JSON.stringify(Object.fromEntries(trucks.map(t=>{const e=truckSvgMap[t.id]||{};return[t.id,{type:e.type||'',data:e.type==='png'?'':e.data||'',saveToDb:!!e.saveToDb}];})))};
+
+// Save auto-generated QR codes to DB on first load
+(async()=>{
+  for(const[tid,entry]of Object.entries(QR_MAP)){
+    if(entry.saveToDb&&entry.data){
+      await fetch('/api/save-qr-code',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({truck_id:tid,qr_code_svg:entry.data})}).catch(()=>{});
+    }
+  }
+})();
+
+const PNG_DATA=${JSON.stringify(Object.fromEntries(Object.entries(QR_PNG_DATA).filter(([k])=>trucks.some(t=>t.id===k))))};
+
 async function saveTruckName(truckId,n){
   const val=document.getElementById('tnm-'+n).value.trim();
   const r=await fetch('/api/truck-name',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({truck_id:truckId,truck_name:val||null})}).then(r=>r.json()).catch(()=>({ok:false}));
-  if(r.ok){const h=document.querySelector('#tnm-'+n).closest('.dsec').querySelector('h2');if(h)h.childNodes[0].textContent=(val||'Truck T'+n)+' ';}
+  if(r.ok){const h=document.querySelector('[data-truck="'+truckId+'"] h2');if(h)h.childNodes[0].textContent=(val||'Truck T'+n)+' ';}
 }
-function downloadQR(truckId,ext){
-  const data=QR_DATA[truckId];
-  const n=truckId.replace('t','');
-  const filename='QR-Perks-T'+n+'.'+ext;
-  if(ext==='svg'){
-    const svg='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="400" height="400"><image href="'+(data||'')+'" x="0" y="0" width="400" height="400"/></svg>';
-    const blob=new Blob([svg],{type:'image/svg+xml'});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');a.href=url;a.download=filename;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(url);a.remove();},100);
-    return;
-  }
-  if(!data){alert('QR code not available for download');return;}
-  const b64=data.split(',')[1]||data;
-  const bin=atob(b64);
-  const bytes=new Uint8Array(bin.length);
-  for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
-  const mime=ext==='png'?'image/png':'image/jpeg';
+
+function getSvgForTruck(truckId){
+  const entry=QR_MAP[truckId];
+  if(!entry)return null;
+  if(entry.type==='png'){const d=PNG_DATA[truckId];if(!d)return null;return{kind:'png',data:d};}
+  return{kind:'svg',data:entry.data};
+}
+
+function downloadBlob(bytes,mime,filename){
   const blob=new Blob([bytes],{type:mime});
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a');a.href=url;a.download=filename;document.body.appendChild(a);a.click();
-  setTimeout(()=>{URL.revokeObjectURL(url);a.remove();},100);
-}
-</script>`);
+  setTimeout(()=>{URL.revokeObjectURL(url);a.remove();},200);
 }
 
-function qrPlaceholder(truckNum) {
-  // Use real QR code if available, else fall back to placeholder
-  const real = QR_CODES['t' + truckNum];
-  if (real) {
-    // Wrap the real SVG in a styled container div for display
-    return `<div style="background:white;border:2px solid #00ff8840;border-radius:12px;padding:12px;display:inline-block;max-width:220px">${real}<p style="text-align:center;font-family:monospace;font-size:11px;color:#666;margin-top:6px;margin-bottom:0">qr-perks.com/t${truckNum}</p></div>`;
+function svgToPngBlob(svgStr,w,h,mime,quality,cb){
+  const img=new Image();
+  const sBlob=new Blob([svgStr],{type:'image/svg+xml'});
+  const sUrl=URL.createObjectURL(sBlob);
+  img.onload=()=>{
+    const cv=document.createElement('canvas');cv.width=w;cv.height=h;
+    const ctx=cv.getContext('2d');ctx.fillStyle='white';ctx.fillRect(0,0,w,h);ctx.drawImage(img,0,0,w,h);
+    cv.toBlob(b=>cb(b),mime,quality);
+    URL.revokeObjectURL(sUrl);
+  };
+  img.onerror=()=>URL.revokeObjectURL(sUrl);
+  img.src=sUrl;
+}
+
+function makePdfFromJpeg(jpegBytes,w,h){
+  const W=String(w),H=String(h),imgLen=jpegBytes.length;
+  const enc=new TextEncoder();
+  const obj1='1 0 obj\\n<</Type /Catalog /Pages 2 0 R>>\\nendobj\\n';
+  const obj2='2 0 obj\\n<</Type /Pages /Kids [3 0 R] /Count 1>>\\nendobj\\n';
+  const obj3='3 0 obj\\n<</Type /Page /Parent 2 0 R /MediaBox [0 0 '+W+' '+H+']\\n/Contents 4 0 R /Resources <</XObject <</Im1 5 0 R>>>>>>\\nendobj\\n';
+  const sc='q '+W+' 0 0 '+H+' 0 0 cm /Im1 Do Q';
+  const obj4='4 0 obj\\n<</Length '+sc.length+'>>\\nstream\\n'+sc+'\\nendstream\\nendobj\\n';
+  const obj5h='5 0 obj\\n<</Type /XObject /Subtype /Image /Width '+W+' /Height '+H+'\\n/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length '+imgLen+'>>\\nstream\\n';
+  const obj5f='\\nendstream\\nendobj\\n';
+  const hdr='%PDF-1.4\\n';
+  let pos=hdr.length,offs=[];
+  [obj1,obj2,obj3,obj4].forEach(o=>{offs.push(pos);pos+=o.length;});
+  offs.push(pos);
+  const xrefPos=pos+obj5h.length+imgLen+obj5f.length;
+  const xref='xref\\n0 6\\n0000000000 65535 f \\n'+offs.map(o=>o.toString().padStart(10,'0')+' 00000 n ').join('\\n')+'\\n';
+  const trailer='trailer\\n<</Size 6 /Root 1 0 R>>\\nstartxref\\n'+xrefPos+'\\n%%EOF';
+  const parts=[enc.encode(hdr+obj1+obj2+obj3+obj4+obj5h),jpegBytes,enc.encode(obj5f+xref+trailer)];
+  const total=parts.reduce((s,p)=>s+p.length,0);
+  const out=new Uint8Array(total);let off=0;for(const p of parts){out.set(p,off);off+=p.length;}
+  return out;
+}
+
+function downloadQR(truckId,ext){
+  const n=truckId.replace('t','');
+  const filename='QR-Perks-T'+n+'.'+ext;
+  const entry=getSvgForTruck(truckId);
+  if(!entry){alert('QR code not available');return;}
+
+  if(ext==='svg'){
+    let svgStr;
+    if(entry.kind==='svg'){svgStr=entry.data;}
+    else{// PNG: wrap in SVG
+      svgStr='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="400" height="400"><image href="'+entry.data+'" x="0" y="0" width="400" height="400"/></svg>';
+    }
+    downloadBlob(new TextEncoder().encode(svgStr),'image/svg+xml',filename);
+    return;
   }
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="180" height="180" style="border:2px solid #00ff8840;border-radius:12px;background:#0f0f18;padding:12px">
-<rect x="20" y="20" width="60" height="60" fill="none" stroke="#00ff88" stroke-width="4"/>
-<rect x="30" y="30" width="40" height="40" fill="#00ff88" opacity=".3"/>
-<rect x="120" y="20" width="60" height="60" fill="none" stroke="#00ff88" stroke-width="4"/>
-<rect x="130" y="30" width="40" height="40" fill="#00ff88" opacity=".3"/>
-<rect x="20" y="120" width="60" height="60" fill="none" stroke="#00ff88" stroke-width="4"/>
-<rect x="30" y="130" width="40" height="40" fill="#00ff88" opacity=".3"/>
-<text x="100" y="107" text-anchor="middle" font-family="monospace" font-size="11" fill="#00ff88" font-weight="bold">T${truckNum}</text>
-<text x="100" y="118" text-anchor="middle" font-family="monospace" font-size="7" fill="#555">qr-perks.com/t${truckNum}</text>
-</svg>`;
+
+  if(entry.kind==='png'){
+    // Use base64 PNG directly
+    const b64=(entry.data.split(',')[1]||entry.data);
+    const bin=atob(b64);const bytes=new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
+    if(ext==='pdf'){
+      svgToPngBlob('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="400" height="400"><image href="'+entry.data+'" x="0" y="0" width="400" height="400"/></svg>',400,400,'image/jpeg',0.92,b=>{
+        b.arrayBuffer().then(ab=>{downloadBlob(makePdfFromJpeg(new Uint8Array(ab),400,400),'application/pdf',filename);});
+      });
+      return;
+    }
+    if(ext==='jpeg'){
+      svgToPngBlob('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400"><image href="'+entry.data+'" x="0" y="0" width="400" height="400"/></svg>',400,400,'image/jpeg',0.95,b=>{
+        b.arrayBuffer().then(ab=>downloadBlob(new Uint8Array(ab),'image/jpeg',filename));
+      });
+      return;
+    }
+    // PNG
+    downloadBlob(bytes,'image/png',filename);
+    return;
+  }
+
+  // SVG kind — need to rasterize
+  const svgStr=entry.data;
+  if(ext==='png'){
+    svgToPngBlob(svgStr,330,330,'image/png',1,b=>{
+      b.arrayBuffer().then(ab=>downloadBlob(new Uint8Array(ab),'image/png',filename));
+    });
+    return;
+  }
+  if(ext==='jpeg'){
+    svgToPngBlob(svgStr,330,330,'image/jpeg',0.95,b=>{
+      b.arrayBuffer().then(ab=>downloadBlob(new Uint8Array(ab),'image/jpeg',filename));
+    });
+    return;
+  }
+  if(ext==='pdf'){
+    svgToPngBlob(svgStr,330,330,'image/jpeg',0.92,b=>{
+      b.arrayBuffer().then(ab=>{downloadBlob(makePdfFromJpeg(new Uint8Array(ab),330,330),'application/pdf',filename);});
+    });
+    return;
+  }
+}
+</script>`);
 }
 
 async function handleDriverQrCodesPost(request, env, driver) {
@@ -1714,7 +1922,7 @@ td:first-child{color:var(--txt)}
 form{display:inline}
 </style></head><body>
 <nav class="anav">
-  <span class="anav-logo">QRP ADMIN</span>
+  <a href="/admin/dashboard" class="anav-logo" style="text-decoration:none;color:var(--acc)">QRP ADMIN</a>
   <a href="/admin/dashboard">Overview</a>
   <a href="/admin/dashboard#drivers">Drivers</a>
   <a href="/admin/dashboard#trucks">Trucks</a>
@@ -1740,7 +1948,7 @@ body{display:flex;align-items:center;justify-content:center;min-height:100vh;pad
 .msg-err{margin-bottom:16px}
 </style></head>
 <body><div class="card">
-<div class="logo">QRP ADMIN</div>
+<a href="/" class="logo" style="text-decoration:none;color:var(--acc)">QRP ADMIN</a>
 <div class="msg-err" id="err"></div>
 <div class="form-group"><input type="password" id="pw" placeholder="Admin password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()"></div>
 <button class="btn" style="width:100%" onclick="doLogin()">Enter →</button>
@@ -2090,8 +2298,8 @@ h1{font-size:26px;font-weight:800;margin-bottom:8px}
 .form-group{margin-bottom:16px}
 </style></head><body>
 <div class="page">
-<div class="logo">QR PERKS</div>
-<a href="/" class="back">← Back</a>
+<a href="/" class="logo" style="text-decoration:none;color:var(--acc)">QR PERKS</a>
+<a href="/" class="back" style="display:block;margin-top:12px">← Back</a>
 <h1><span class="en">Contact Us</span><span class="es">Contáctanos</span></h1>
 <p class="sub"><span class="en">We typically respond within 1–2 business days.</span><span class="es">Normalmente respondemos dentro de 1–2 días hábiles.</span></p>
 <div class="card">
@@ -2111,12 +2319,20 @@ function getLang(){const s=localStorage.getItem('qrp-lang');if(s)return s;return
 function setLang(l){localStorage.setItem('qrp-lang',l);document.documentElement.setAttribute('data-lang',l);}
 setLang(getLang());
 async function sendContact(){
+  const btn=event.currentTarget||document.querySelector('#cform .btn');
+  if(btn){btn.disabled=true;btn.textContent=getLang()==='en'?'Sending...':'Enviando...';}
   const r=await fetch('/api/contact',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({name:document.getElementById('cn').value,email:document.getElementById('ce').value,message:document.getElementById('cm').value})});
-  const d=await r.json();
-  document.getElementById('cform').style.display='none';
-  document.getElementById('ok').textContent=getLang()==='en'?'Message sent! We\'ll reply within 1–2 business days.':'¡Mensaje enviado! Te responderemos en 1–2 días hábiles.';
-  document.getElementById('ok').classList.add('show');
+    body:JSON.stringify({name:document.getElementById('cn').value,email:document.getElementById('ce').value,message:document.getElementById('cm').value})}).catch(()=>null);
+  const d=r?await r.json().catch(()=>({})):{};
+  if(d.ok){
+    document.getElementById('cform').style.display='none';
+    document.getElementById('ok').textContent=getLang()==='en'?'Message sent! We\'ll reply within 1–2 business days.':'¡Mensaje enviado! Te responderemos en 1–2 días hábiles.';
+    document.getElementById('ok').classList.add('show');
+  } else {
+    document.getElementById('err').textContent=d.error||(getLang()==='en'?'Send failed. Please email support@qr-perks.com':'Error al enviar. Escríbenos a support@qr-perks.com');
+    document.getElementById('err').classList.add('show');
+    if(btn){btn.disabled=false;btn.textContent=getLang()==='en'?'Send Message':'Enviar Mensaje';}
+  }
 }
 </script>
 </body></html>`);
@@ -2126,10 +2342,32 @@ async function handleContactPost(request, env) {
   try {
     const { name, email, message } = await request.json();
     if (!name||!email||!message) return jsonOk({ ok:false, error:'All fields required' });
-    await sbPost(env, 'email_captures', { email, source:'contact_form', offer_clicked:null, ip_hash:await hashIp(request.headers.get('CF-Connecting-IP')||'') });
-    await sendEmail(env, { to:'support@qr-perks.com', subject:`QR Perks Contact: ${name}`, html:emailBase(`<div class="card"><h1>New Contact Message</h1><p><strong>From:</strong> ${name} (${email})</p><p>${message.replace(/\n/g,'<br>')}</p></div>`), template_name:'contact' });
+    if (!env.RESEND_API_KEY) return jsonOk({ ok:false, error:'Email service unavailable' });
+    const ip_hash = await hashIp(request.headers.get('CF-Connecting-IP')||'');
+    // Log to Supabase (non-blocking)
+    sbPost(env, 'email_captures', { email, source:'contact_form', offer_clicked:null, ip_hash }).catch(()=>{});
+    // Send via Resend to support@qr-perks.com (which routes to qrperks@gmail.com)
+    const res = await fetch('https://api.resend.com/emails', {
+      method:'POST',
+      headers:{'Authorization':`Bearer ${env.RESEND_API_KEY}`,'Content-Type':'application/json'},
+      body: JSON.stringify({
+        from:'QR Perks <noreply@qr-perks.com>',
+        to:['support@qr-perks.com'],
+        reply_to: email,
+        subject:`QR Perks Contact Form: ${name}`,
+        html: emailBase(`<div class="card"><h1>New Contact Message</h1><p><strong>From:</strong> ${name}<br><strong>Email:</strong> <a href="mailto:${email}">${email}</a></p><p style="white-space:pre-wrap">${message.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>')}</p></div>`)
+      })
+    });
+    if (!res.ok) {
+      const errText = await res.text().catch(()=>'');
+      console.error('Contact Resend error', res.status, errText);
+      return jsonOk({ ok:false, error:'Failed to send. Please email support@qr-perks.com directly.' });
+    }
     return jsonOk({ ok:true });
-  } catch { return jsonOk({ ok:true }); }
+  } catch(e) {
+    console.error('handleContactPost error', e.message);
+    return jsonOk({ ok:false, error:'Server error. Please email support@qr-perks.com directly.' });
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -2152,8 +2390,8 @@ ul{color:var(--sub);font-size:15px;padding-left:20px;margin-bottom:14px;line-hei
 .effective{color:#444;font-size:13px;margin-bottom:28px}
 </style></head><body>
 <div class="lpage">
-<div class="logo">QR PERKS</div>
-<a href="/" class="back">← Back to QR Perks</a>
+<a href="/" class="logo" style="text-decoration:none;color:var(--acc)">QR PERKS</a>
+<a href="/" class="back" style="display:block;margin-top:12px">← Back to QR Perks</a>
 ${body}
 </div>
 <script>
@@ -2181,8 +2419,7 @@ function staticPage(slug) {
 <span class="es">No vendemos su información personal. Compartimos datos con socios afiliados solo para rastrear conversiones y procesar comisiones.</span></p>
 <h2><span class="en">Your Rights</span><span class="es">Sus Derechos</span></h2>
 <p><span class="en">You may request access to, correction of, or deletion of your personal data by emailing <a href="mailto:privacy@qr-perks.com">privacy@qr-perks.com</a>.</span>
-<span class="es">Puede solicitar acceso, corrección o eliminación de sus datos personales enviando un correo a <a href="mailto:privacy@qr-perks.com">privacy@qr-perks.com</a>.</span></p>
-<p><a href="mailto:privacy@qr-perks.com">privacy@qr-perks.com</a></p>`);
+<span class="es">Puede solicitar acceso, corrección o eliminación de sus datos personales enviando un correo a <a href="mailto:privacy@qr-perks.com">privacy@qr-perks.com</a>.</span></p>`);
 
   if (slug==='terms') return legalShell('Terms of Service', `
 <h1><span class="en">Terms of Service</span><span class="es">Términos de Servicio</span></h1>
@@ -2279,6 +2516,247 @@ async function acceptContractor(){
 <p><a href="mailto:privacy@qr-perks.com">privacy@qr-perks.com</a> · <a href="/privacy">Privacy Policy</a></p>`);
 
   return html404();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// UNSUBSCRIBE HANDLER
+// ═══════════════════════════════════════════════════════════════
+
+async function handleUnsubscribe(request, env) {
+  const url = new URL(request.url);
+  const email = url.searchParams.get('email');
+  if (!email) return staticPage('unsubscribe');
+  // Flag all records for this email as unsubscribed
+  try {
+    await fetch(`${env.SUPABASE_URL}/rest/v1/email_captures?email=eq.${encodeURIComponent(email)}`, {
+      method:'PATCH', headers:{ ...sbHdr(env), 'Prefer':'return=minimal' },
+      body: JSON.stringify({ status:'unsubscribed' })
+    });
+  } catch(e) { console.error('unsubscribe error', e.message); }
+  const safeEmail = email.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return legalShell('Unsubscribed', `
+<h1><span class="en">You've been unsubscribed</span><span class="es">Has sido dado de baja</span></h1>
+<p class="effective" style="color:#00ff88">✅ ${safeEmail}</p>
+<p><span class="en">The email address above has been removed from all QR Perks marketing communications. You will not receive any further emails from us.</span>
+<span class="es">La dirección de correo anterior ha sido eliminada de todas las comunicaciones de marketing de QR Perks. No recibirás más correos de nuestra parte.</span></p>
+<p><span class="en">To re-subscribe or for questions, email <a href="mailto:support@qr-perks.com">support@qr-perks.com</a>.</span>
+<span class="es">Para volver a suscribirte o si tienes preguntas, escríbenos a <a href="mailto:support@qr-perks.com">support@qr-perks.com</a>.</span></p>
+<a href="/" style="display:inline-block;margin-top:20px;color:var(--acc)">← Back to QR Perks</a>`);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SAVE QR CODE HANDLER
+// ═══════════════════════════════════════════════════════════════
+
+async function handleSaveQrCode(request, env) {
+  try {
+    const { truck_id, qr_code_svg } = await request.json();
+    if (!truck_id || !qr_code_svg) return jsonOk({ ok:false, error:'truck_id and qr_code_svg required' });
+    // ALTER TABLE trucks ADD COLUMN IF NOT EXISTS qr_code_svg TEXT (run once via Supabase SQL)
+    await sbPatch(env, 'trucks', `id=eq.${encodeURIComponent(truck_id)}`, { qr_code_svg });
+    return jsonOk({ ok:true });
+  } catch(e) { return jsonOk({ ok:false, error:e.message }); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SMS WEBHOOK — TCPA OPT-OUT HANDLING
+// ═══════════════════════════════════════════════════════════════
+
+async function handleSmsWebhook(request, env) {
+  try {
+    const body = await request.text();
+    const params = new URLSearchParams(body);
+    const from = params.get('From') || '';
+    const msgBody = (params.get('Body') || '').trim().toUpperCase().replace(/[^A-Z]/g,'');
+    const stopWords = ['STOP','CANCEL','UNSUBSCRIBE','END','QUIT'];
+    if (stopWords.includes(msgBody) && from) {
+      // Flag as sms_unsubscribed in Supabase
+      await fetch(`${env.SUPABASE_URL}/rest/v1/email_captures?phone=eq.${encodeURIComponent(from)}`, {
+        method:'PATCH', headers:{ ...sbHdr(env), 'Prefer':'return=minimal' },
+        body: JSON.stringify({ sms_unsubscribed:true, sms_unsubscribed_at:new Date().toISOString() })
+      }).catch(()=>{});
+      // Respond with Twilio-compatible TwiML confirmation
+      return new Response(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>You have been unsubscribed from QR Perks SMS. No further messages will be sent. Reply START to re-subscribe.</Message></Response>`, {
+        headers:{'Content-Type':'text/xml'}
+      });
+    }
+    return new Response(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`, { headers:{'Content-Type':'text/xml'} });
+  } catch(e) { return new Response('', { status:200 }); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// MINIMAL QR CODE GENERATOR — Pure JS, no external deps
+// Byte mode, ECC Level L, Versions 1-3 (up to 53 bytes)
+// ═══════════════════════════════════════════════════════════════
+
+function generateQRSvg(text) {
+  const bytes = Array.from(new TextEncoder().encode(text));
+  const n = bytes.length;
+  // Version capacities (Byte mode, ECC L): V1=17, V2=32, V3=53
+  let version = 1;
+  if (n > 17) version = 2;
+  if (n > 32) version = 3;
+  const size = version * 4 + 17;
+
+  // GF(256) with primitive poly 285 (0x11D)
+  const EXP = new Uint8Array(256), LOG = new Uint8Array(256);
+  { let x=1; for(let i=0;i<255;i++){EXP[i]=x;LOG[x]=i;x<<=1;if(x&256)x^=285;x&=255;} EXP[255]=1; }
+  const gmul = (a,b) => a&&b ? EXP[(LOG[a]+LOG[b])%255] : 0;
+
+  // Build RS generator polynomial for eccLen error correction codewords
+  // ECC codewords: V1=7, V2=10, V3=15
+  const eccLen = [0,7,10,15][version];
+  let gen=[1];
+  for(let i=0;i<eccLen;i++){
+    const ng=new Array(gen.length+1).fill(0);
+    for(let j=0;j<gen.length;j++){ng[j]^=gen[j];ng[j+1]^=gmul(gen[j],EXP[i]);}
+    gen=ng;
+  }
+
+  // Data codewords capacity: V1=19, V2=34, V3=55
+  const dcap=[0,19,34,55][version];
+  const bits=[];
+  const pushBits=(val,len)=>{for(let i=len-1;i>=0;i--)bits.push((val>>i)&1);};
+  pushBits(4,4); // byte mode
+  pushBits(n,8); // char count (versions 1-9)
+  for(const b of bytes) pushBits(b,8);
+  for(let i=0;i<4&&bits.length<dcap*8;i++) bits.push(0); // terminator
+  while(bits.length%8) bits.push(0); // byte boundary
+  let pad=0;
+  while(bits.length<dcap*8){pushBits(pad?17:236,8);pad^=1;} // padding bytes
+
+  const data=[];
+  for(let i=0;i<bits.length;i+=8){let b=0;for(let j=0;j<8;j++)b=(b<<1)|bits[i+j];data.push(b);}
+
+  // Reed-Solomon error correction
+  const msg=[...data,...new Array(eccLen).fill(0)];
+  for(let i=0;i<data.length;i++){
+    const c=msg[i];if(c)for(let j=1;j<=eccLen;j++)msg[i+j]^=gmul(c,gen[j]);
+  }
+  const ecc=msg.slice(data.length);
+
+  // Bit stream from codewords + remainder bits (V1=0,V2=7,V3=7)
+  const cw=[...data,...ecc];
+  const bs=[];
+  for(const b of cw)for(let i=7;i>=0;i--)bs.push((b>>i)&1);
+  const rem=[0,0,7,7][version];
+  for(let i=0;i<rem;i++)bs.push(0);
+
+  // Matrix: -1=unset, 0=light, 1=dark; func=function module
+  const mat=Array.from({length:size},()=>new Int8Array(size).fill(-1));
+  const func=Array.from({length:size},()=>new Uint8Array(size));
+
+  // Finder pattern at (r,c) top-left corner
+  const addFinder=(r,c)=>{
+    for(let dr=-1;dr<=7;dr++)for(let dc=-1;dc<=7;dc++){
+      const row=r+dr,col=c+dc;
+      if(row<0||row>=size||col<0||col>=size)continue;
+      func[row][col]=1;
+      const inSq=dr>=0&&dr<=6&&dc>=0&&dc<=6;
+      mat[row][col]=inSq&&(dr===0||dr===6||dc===0||dc===6||( dr>=2&&dr<=4&&dc>=2&&dc<=4))?1:0;
+    }
+  };
+  addFinder(0,0);addFinder(0,size-7);addFinder(size-7,0);
+
+  // Timing patterns
+  for(let i=8;i<size-8;i++){
+    mat[6][i]=(i+1)%2;func[6][i]=1;
+    mat[i][6]=(i+1)%2;func[i][6]=1;
+  }
+
+  // Alignment pattern (V2+): single at (18,18) for V2, (22,22) for V3
+  if(version>=2){
+    const ap=version===2?18:22;
+    for(let dr=-2;dr<=2;dr++)for(let dc=-2;dc<=2;dc++){
+      const row=ap+dr,col=ap+dc;
+      if(func[row][col])continue;
+      func[row][col]=1;
+      mat[row][col]=(dr===0&&dc===0)||Math.abs(dr)===2||Math.abs(dc)===2?1:0;
+    }
+  }
+
+  // Format info placeholder + dark module
+  const fmtCells=[[8,0],[8,1],[8,2],[8,3],[8,4],[8,5],[8,7],[8,8],[7,8],[5,8],[4,8],[3,8],[2,8],[1,8],[0,8]];
+  const fmtCells2=[[size-1,8],[size-2,8],[size-3,8],[size-4,8],[size-5,8],[size-6,8],[size-7,8],[8,size-8],[8,size-7],[8,size-6],[8,size-5],[8,size-4],[8,size-3],[8,size-2],[8,size-1]];
+  for(const [r,c]of fmtCells){func[r][c]=1;mat[r][c]=0;}
+  for(const [r,c]of fmtCells2){func[r][c]=1;mat[r][c]=0;}
+  mat[size-8][8]=1;func[size-8][8]=1; // always-dark module
+
+  // Place data bits (zigzag)
+  let bi=0,upward=true;
+  for(let right=size-1;right>=1;right-=2){
+    if(right===6)right=5;
+    for(let vert=0;vert<size;vert++){
+      const row=upward?size-1-vert:vert;
+      for(let lr=0;lr<=1;lr++){
+        const col=right-lr;
+        if(!func[row][col])mat[row][col]=bi<bs.length?bs[bi++]:0;
+      }
+    }
+    upward=!upward;
+  }
+
+  // Masking: evaluate all 8 patterns, pick best
+  const maskFns=[
+    (r,c)=>(r+c)%2===0,
+    (r,c)=>r%2===0,
+    (r,c)=>c%3===0,
+    (r,c)=>(r+c)%3===0,
+    (r,c)=>(Math.floor(r/2)+Math.floor(c/3))%2===0,
+    (r,c)=>(r*c)%2+(r*c)%3===0,
+    (r,c)=>((r*c)%2+(r*c)%3)%2===0,
+    (r,c)=>((r+c)%2+(r*c)%3)%2===0,
+  ];
+  let bestMask=0,bestPen=Infinity;
+  for(let m=0;m<8;m++){
+    const t=mat.map(row=>Int8Array.from(row));
+    for(let r=0;r<size;r++)for(let c=0;c<size;c++)if(!func[r][c]&&maskFns[m](r,c))t[r][c]^=1;
+    const pen=qrPenalty(t,size);
+    if(pen<bestPen){bestPen=pen;bestMask=m;}
+  }
+  for(let r=0;r<size;r++)for(let c=0;c<size;c++)if(!func[r][c]&&maskFns[bestMask](r,c))mat[r][c]^=1;
+
+  // Format string: ECC Level L (indicator=01=1), chosen mask
+  const fmtStr=qrFormatStr(1,bestMask);
+  for(let i=0;i<15;i++){
+    const bit=(fmtStr>>i)&1;
+    const [r1,c1]=fmtCells[i];mat[r1][c1]=bit;
+    const [r2,c2]=fmtCells2[i];mat[r2][c2]=bit;
+  }
+
+  // Render SVG
+  const ps=10,qs=4,total=(size+qs*2)*ps;
+  let svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${total} ${total}" width="${total}" height="${total}"><rect width="${total}" height="${total}" fill="white"/>`;
+  for(let r=0;r<size;r++)for(let c=0;c<size;c++)if(mat[r][c]===1)svg+=`<rect x="${(c+qs)*ps}" y="${(r+qs)*ps}" width="${ps}" height="${ps}" fill="black"/>`;
+  svg+='</svg>';
+  return svg;
+}
+
+function qrPenalty(mat,size){
+  let p=0;
+  for(let r=0;r<size;r++){
+    let run=1,cur=mat[r][0];
+    for(let c=1;c<size;c++){if(mat[r][c]===cur){run++;if(run===5)p+=3;else if(run>5)p++;}else{cur=mat[r][c];run=1;}}
+    run=1;cur=mat[0][r];
+    for(let c=1;c<size;c++){if(mat[c][r]===cur){run++;if(run===5)p+=3;else if(run>5)p++;}else{cur=mat[c][r];run=1;}}
+  }
+  for(let r=0;r<size-1;r++)for(let c=0;c<size-1;c++){const v=mat[r][c];if(v===mat[r][c+1]&&v===mat[r+1][c]&&v===mat[r+1][c+1])p+=3;}
+  const p1=[1,0,1,1,1,0,1,0,0,0,0],p2=[0,0,0,0,1,0,1,1,1,0,1];
+  for(let r=0;r<size;r++)for(let c=0;c<=size-11;c++){
+    if(p1.every((v,i)=>mat[r][c+i]===v)||p2.every((v,i)=>mat[r][c+i]===v))p+=40;
+    if(p1.every((v,i)=>mat[c+i][r]===v)||p2.every((v,i)=>mat[c+i][r]===v))p+=40;
+  }
+  let dark=0;for(let r=0;r<size;r++)for(let c=0;c<size;c++)if(mat[r][c]===1)dark++;
+  p+=Math.abs(Math.floor(dark/(size*size)*100/5)*5-50)/5*2*10;
+  return p;
+}
+
+function qrFormatStr(eccLevel,maskPattern){
+  // eccLevel: L=1 (indicator 01)
+  const data=(eccLevel<<3)|(maskPattern&7);
+  let g=data<<10;
+  for(let i=4;i>=0;i--)if((g>>(i+10))&1)g^=(0b10100110111<<i);
+  return ((data<<10)|(g&0b1111111111))^0b101010000010010;
 }
 
 // ═══════════════════════════════════════════════════════════════
