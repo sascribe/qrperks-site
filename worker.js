@@ -1,5 +1,7 @@
 // QR-Perks Cloudflare Worker — v5 Full Platform Fix 2026-04-13
 // Env: SUPABASE_URL, SUPABASE_SECRET, ADMIN_PASSWORD,
+// PHYSICAL_ADDRESS — update to your registered business address (required by CAN-SPAM)
+const PHYSICAL_ADDRESS = '548 Market St PMB 96203, San Francisco, CA 94104';  // ← UPDATE THIS
 //      RESEND_API_KEY, DRIVER_JWT_SECRET, W9_ENCRYPTION_KEY
 
 const FALLBACK_AFFILIATES = [
@@ -200,6 +202,8 @@ async function route(request, env, ctx) {
     'POST /driver/settings':          () => requireDriver(request, env, handleDriverSettingsPost),
     'POST /driver/set-payment':       () => requireDriver(request, env, handleDriverSetPayment),
     'POST /driver/accept-contractor': () => requireDriver(request, env, handleDriverAcceptContractor),
+    'GET /driver/fleet':              () => requireDriver(request, env, handleDriverFleet),
+    'POST /driver/fleet':             () => requireDriver(request, env, handleDriverFleetPost),
   };
   const dKey = `${method} ${path}`;
   if (driverRoutes[dKey]) return await driverRoutes[dKey]();
@@ -228,6 +232,7 @@ async function route(request, env, ctx) {
   if (path === '/api/save-qr-code' && method === 'POST')              return handleSaveQrCode(request, env);
   if (path === '/api/sms-webhook'  && method === 'POST')              return handleSmsWebhook(request, env);
   if (path === '/api/conversion'            && method === 'GET')               return handleApiConversion(request, env);
+  if (path === '/admin/leads/export'        && method === 'GET')               return handleAdminLeadsExport(request, env);
   if (path === '/admin/conversions/mark-paid' && method === 'POST')            return handleAdminConvMarkPaid(request, env);
 
   // Landing page
@@ -297,6 +302,16 @@ async function verifyJwt(token, secret) {
   const payload = JSON.parse(atob(parts[1].replace(/-/g,'+').replace(/_/g,'/')));
   if (payload.exp && Date.now()/1000 > payload.exp) return null;
   return payload;
+}
+
+// Constant-time string comparison — prevents timing attacks on admin auth
+function timingSafeEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  let result = a.length ^ b.length;
+  const len = Math.max(a.length, b.length);
+  const pa = a.padEnd(len, '\0'), pb = b.padEnd(len, '\0');
+  for (let i = 0; i < len; i++) result |= pa.charCodeAt(i) ^ pb.charCodeAt(i);
+  return result === 0;
 }
 
 function b64url(input) {
@@ -391,7 +406,7 @@ async function sendEmail(env, { to, subject, html, template_name }) {
     if (subscriberTemplates.includes(template_name)) {
       const rec = await sbGetOne(env, 'email_captures', `email=eq.${encodeURIComponent(to)}&select=status`);
       if (rec && rec.status === 'unsubscribed') {
-        console.log('Skipping email to unsubscribed:', to);
+        console.log('Skipping email to unsubscribed: [masked]');
         return null;
       }
     }
@@ -437,7 +452,8 @@ a{color:#00ff88}
 ${content}
 <hr>
 <p class="dim">QR Perks · qr-perks.com<br>
-<a href="${unsubLink}" style="color:#444">Unsubscribe</a></p>
+${PHYSICAL_ADDRESS}<br>
+<a href="${unsubLink}" style="color:#444">Unsubscribe</a> · <a href="https://qr-perks.com/privacy" style="color:#444">Privacy Policy</a></p>
 </div></body></html>`;
 };
 
@@ -532,7 +548,7 @@ function sessCookie(token, clear=false) {
 function isAdminAuthed(request, env) {
   try {
     const c = getCookie(request, 'qrp_admin');
-    return !!(c && env.ADMIN_PASSWORD && c === env.ADMIN_PASSWORD);
+    return !!(c && env.ADMIN_PASSWORD && timingSafeEqual(c, env.ADMIN_PASSWORD));
   } catch { return false; }
 }
 
@@ -787,6 +803,7 @@ ${DS}
   <div class="br-form">
     <input type="email" id="br-email" autocomplete="email">
     <input type="tel" id="br-phone" autocomplete="tel">
+    <p style="font-size:10px;color:#666;margin:4px 0 8px;line-height:1.4"><span class="en">By providing your phone number, you consent to receive promotional text messages from QR Perks. Msg &amp; data rates may apply. Reply STOP to unsubscribe.</span><span class="es">Al proporcionar su número, acepta recibir mensajes promocionales. Tarifas aplican. Responda STOP para cancelar.</span></p>
     <button class="br-btn" id="br-alert"><span class="en">Alert Me + Continue →</span><span class="es">Notifícarme + Continuar →</span></button>
     <button class="br-skip" id="br-skip"><span class="en">No Thank You — take me to the offer →</span><span class="es">No Gracias — llevarme a la oferta →</span></button>
   </div>
@@ -1273,7 +1290,7 @@ code-block{background:#0f0f18;padding:12px 16px;border-radius:10px;display:block
 </style></head><body>
 <nav class="dnav">
   <a href="/" class="dnav-logo" style="text-decoration:none;color:var(--acc)">QRP</a>
-  ${[['dashboard','Dashboard'],['qr-codes','QR Codes'],['earnings','Earnings'],['referrals','Referrals'],['w9','W9'],['settings','Settings']].map(([p,l])=>`<a href="/driver/${p}" class="${active===p?'active':''}">${l}</a>`).join('')}
+  ${[['dashboard','Dashboard'],['qr-codes','QR Codes'],['fleet','My Fleet'],['earnings','Earnings'],['referrals','Referrals'],['w9','W9'],['settings','Settings']].map(([p,l])=>`<a href="/driver/${p}" class="${active===p?'active':''}">${l}</a>`).join('')}
   <form action="/driver/logout" method="POST" style="display:flex;margin-left:auto">
     <button type="submit" class="dnav-logout">Logout</button>
   </form>
@@ -1365,7 +1382,7 @@ ${stepsHtml}
   <h2>Your Trucks</h2>
   ${trucks.length?`<table><tr><th>Truck</th><th>Status</th><th>QR Code</th></tr>
   ${trucks.map(t=>`<tr><td>T${t.id.replace('t','')}</td><td><span class="badge ${t.status==='active'?'badge-green':'badge-yellow'}">${t.status}</span></td><td><a href="/driver/qr-codes" style="color:var(--acc);font-size:13px">Download →</a></td></tr>`).join('')}
-  </table>`:'<p style="color:var(--sub);font-size:14px">No trucks assigned yet. Contact support@qr-perks.com</p>'}
+  </table>`:'<p style="color:var(--sub);font-size:14px">No trucks assigned yet. <a href="/driver/fleet" style="color:var(--acc)">Add a truck →</a></p>'}
 </div>
 <div class="dsec">
   <h2>Referrals</h2>
@@ -1960,6 +1977,107 @@ form{display:inline}
 <div class="apage">${content}</div>
 </body></html>`);
 
+
+// ═══════════════════════════════════════════════════════════════
+// DRIVER FLEET MANAGEMENT
+// ═══════════════════════════════════════════════════════════════
+
+async function handleDriverFleet(request, env, driver) {
+  const trucks = await sbGet(env, 'trucks', `driver_id=eq.${driver.id}&select=*&order=id.asc`);
+  const MAX_TRUCKS = 10;
+  const canAdd = trucks.length < MAX_TRUCKS;
+  return dashShell('My Fleet', 'fleet', `
+<h1>My Fleet</h1>
+<p class="sub">Manage QR codes for all your trucks</p>
+<div class="dsec">
+  <h2>Your Trucks (${trucks.length}/${MAX_TRUCKS})</h2>
+  ${trucks.length ? `<table><tr><th>Truck ID</th><th>Name</th><th>Status</th><th>QR Code</th><th style="text-align:right">Action</th></tr>
+  ${trucks.map(t=>`<tr>
+    <td>${t.id.toUpperCase()}</td>
+    <td style="color:var(--sub)">${t.truck_name||'—'}</td>
+    <td><span class="badge ${t.status==='active'?'badge-green':'badge-yellow'}">${t.status}</span></td>
+    <td><a href="/driver/qr-codes" style="color:var(--acc);font-size:13px">Download →</a></td>
+    <td style="text-align:right">
+      ${t.status==='active'?`<form action="/driver/fleet" method="POST" style="display:inline"><input type="hidden" name="action" value="deactivate"><input type="hidden" name="truck_id" value="${t.id}"><button class="btn btn-sm btn-ghost" style="font-size:11px" onclick="return confirm('Deactivate ${t.id.toUpperCase()}? QR codes will stop working.')">Deactivate</button></form>`:`<form action="/driver/fleet" method="POST" style="display:inline"><input type="hidden" name="action" value="activate"><input type="hidden" name="truck_id" value="${t.id}"><button class="btn btn-sm btn-outline" style="font-size:11px">Activate</button></form>`}
+    </td>
+  </tr>`).join('')}
+  </table>` : '<p style="color:var(--sub);font-size:14px">No trucks yet. Add your first truck below.</p>'}
+</div>
+${canAdd ? `<div class="dsec">
+  <h2>Add a Truck</h2>
+  <p style="color:var(--sub);font-size:13px;margin-bottom:16px">Each truck gets its own QR code. Place it on your vehicle windshield or body panel.</p>
+  <div class="msg-ok" id="fleet-ok" style="display:none;background:#00ff8820;border:1px solid #00ff8840;padding:10px 14px;border-radius:8px;color:#00ff88;margin-bottom:12px"></div>
+  <div class="msg-err" id="fleet-err" style="display:none;background:#ff003320;border:1px solid #ff003340;padding:10px 14px;border-radius:8px;color:#ff4466;margin-bottom:12px"></div>
+  <div class="form-group"><label>Truck Nickname (optional)</label><input type="text" id="truck-name" placeholder="e.g. Truck #2 — Downtown Route" maxlength="60"></div>
+  <button class="btn" onclick="addTruck()" style="max-width:220px">+ Add Truck</button>
+  <p style="color:var(--sub);font-size:12px;margin-top:12px">Your new truck will be active immediately. QR codes available in <a href="/driver/qr-codes" style="color:var(--acc)">QR Codes</a>.</p>
+</div>` : `<div class="dsec"><p style="color:#f59e0b;font-size:14px">Maximum of ${MAX_TRUCKS} trucks reached. Contact support to increase your limit.</p></div>`}
+`, `<script>
+async function addTruck(){
+  const name=document.getElementById('truck-name').value.trim();
+  const ok=document.getElementById('fleet-ok');
+  const err=document.getElementById('fleet-err');
+  ok.style.display='none';err.style.display='none';
+  const r=await fetch('/driver/fleet',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({action:'add',truck_name:name})});
+  const d=await r.json();
+  if(d.ok){ok.textContent='Truck '+d.truck_id.toUpperCase()+' added! Reload to see it.';ok.style.display='block';setTimeout(()=>location.reload(),1500);}
+  else{err.textContent=d.error||'Error adding truck';err.style.display='block';}
+}
+</script>`);
+}
+
+async function handleDriverFleetPost(request, env, driver) {
+  try {
+    // Handle both JSON (AJAX add) and FormData (deactivate/activate buttons)
+    let action, truck_id, truck_name;
+    const ct = request.headers.get('content-type') || '';
+    if (ct.includes('application/json')) {
+      const body = await request.json();
+      action = body.action; truck_name = body.truck_name || '';
+    } else {
+      const form = await request.formData();
+      action = form.get('action'); truck_id = form.get('truck_id');
+    }
+
+    if (action === 'add') {
+      // Check truck limit
+      const existing = await sbGet(env, 'trucks', `driver_id=eq.${driver.id}&select=id`);
+      if (existing.length >= 10) return jsonOk({ ok:false, error:'Maximum 10 trucks per driver' });
+
+      // Find next available truck number
+      const allTrucks = await sbGet(env, 'trucks', 'select=id');
+      const nums = allTrucks.map(t=>parseInt(t.id.replace('t',''))).filter(n=>!isNaN(n));
+      const nextNum = nums.length ? Math.max(...nums) + 1 : 1;
+      const newId = `t${nextNum}`;
+
+      // Generate QR SVG for the new truck
+      const qrUrl = `https://qr-perks.com/${newId}`;
+      const svg = generateQRSvg(qrUrl);
+
+      // Create truck row
+      await sbPost(env, 'trucks', {
+        id: newId,
+        driver_id: driver.id,
+        status: 'active',
+        truck_name: truck_name || null,
+        qr_code_svg: svg,
+      });
+      return jsonOk({ ok:true, truck_id:newId });
+    }
+
+    if ((action === 'deactivate' || action === 'activate') && truck_id) {
+      // Verify truck belongs to this driver
+      const truck = await sbGetOne(env, 'trucks', `id=eq.${truck_id}&driver_id=eq.${driver.id}&select=id`);
+      if (!truck) return Response.redirect(new URL('/driver/fleet', request.url).toString(), 302);
+      await sbPatch(env, 'trucks', `id=eq.${truck_id}`, { status: action==='activate'?'active':'inactive' });
+    }
+    return Response.redirect(new URL('/driver/fleet', request.url).toString(), 302);
+  } catch(e) {
+    return jsonOk({ ok:false, error:'Server error' });
+  }
+}
+
 async function handleAdminLoginPage(request, env) {
   if (isAdminAuthed(request, env)) return Response.redirect(new URL('/admin/dashboard', request.url).toString(), 302);
   return html(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Admin</title>
@@ -2007,7 +2125,7 @@ async function doLogin(){
 async function handleAdminLoginPost(request, env) {
   try {
     const { password } = await request.json();
-    if (!env.ADMIN_PASSWORD || password !== env.ADMIN_PASSWORD) return jsonOk({ ok:false, error:'Invalid password' });
+    if (!env.ADMIN_PASSWORD || !timingSafeEqual(password, env.ADMIN_PASSWORD)) return jsonOk({ ok:false, error:'Invalid password' });
     return new Response(JSON.stringify({ ok:true }), {
       headers:{ 'Content-Type':'application/json',
         'Set-Cookie':`qrp_admin=${env.ADMIN_PASSWORD}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=86400` }
@@ -2134,15 +2252,37 @@ ${affiliates.map(a=>`<tr>
 </table></div>
 
 <div class="asec" id="leads">
-<h2>Email Captures (last 100)</h2>
-<table><tr><th>Date</th><th>Email</th><th>Phone</th><th>Source</th><th>Offer</th></tr>
-${captures.slice(0,60).map(c=>`<tr>
-<td>${new Date(c.created_at).toLocaleDateString()}</td>
+<h2>Email Captures</h2>
+${(()=>{
+  const active  = captures.filter(c=>c.status!=='unsubscribed');
+  const unsub   = captures.filter(c=>c.status==='unsubscribed');
+  const en      = captures.filter(c=>c.lang==='en'||!c.lang);
+  const es      = captures.filter(c=>c.lang==='es');
+  const withPh  = captures.filter(c=>c.phone);
+  return `<div class="stats-row" style="margin-bottom:12px">
+  <div class="astat"><div class="astat-n">${captures.length}</div><div class="astat-l">Total</div></div>
+  <div class="astat"><div class="astat-n" style="color:var(--acc)">${active.length}</div><div class="astat-l">Active</div></div>
+  <div class="astat"><div class="astat-n" style="color:#f59e0b">${unsub.length}</div><div class="astat-l">Unsubscribed</div></div>
+  <div class="astat"><div class="astat-n">${withPh.length}</div><div class="astat-l">With Phone</div></div>
+  <div class="astat"><div class="astat-n">${en.length}</div><div class="astat-l">EN</div></div>
+  <div class="astat"><div class="astat-n">${es.length}</div><div class="astat-l">ES</div></div>
+</div>
+<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+  <a href="/admin/leads/export" class="btn btn-sm" style="font-size:12px;text-decoration:none">⬇ Export CSV (all)</a>
+  <a href="/admin/leads/export?status=active" class="btn btn-sm btn-ghost" style="font-size:12px;text-decoration:none">⬇ Active Only</a>
+  <a href="/admin/leads/export?lang=en" class="btn btn-sm btn-ghost" style="font-size:12px;text-decoration:none">⬇ EN Only</a>
+  <a href="/admin/leads/export?lang=es" class="btn btn-sm btn-ghost" style="font-size:12px;text-decoration:none">⬇ ES Only</a>
+</div>`;
+})()}
+<table><tr><th>Date</th><th>Email</th><th>Phone</th><th>Lang</th><th>Source</th><th>Status</th></tr>
+${captures.slice(0,100).map(c=>`<tr>
+<td style="font-size:12px;color:var(--sub)">${new Date(c.created_at).toLocaleDateString()}</td>
 <td>${c.email||'—'}</td>
 <td style="color:var(--sub)">${c.phone||'—'}</td>
-<td style="color:var(--sub)">${c.source||'—'}</td>
-<td style="color:var(--sub)">${c.offer_clicked||'—'}</td>
-</tr>`).join('')||'<tr><td colspan="5" style="color:var(--sub);padding:12px 0">No leads yet</td></tr>'}
+<td style="color:var(--sub)">${c.lang||'en'}</td>
+<td style="color:var(--sub);font-size:12px">${c.source||'—'}</td>
+<td><span class="badge ${c.status==='unsubscribed'?'badge-red':'badge-green'}">${c.status||'active'}</span></td>
+</tr>`).join('')||'<tr><td colspan="6" style="color:var(--sub);padding:12px 0">No leads yet</td></tr>'}
 </table></div>
 
 <div class="asec" id="conversions">
@@ -2284,6 +2424,60 @@ body{display:flex;align-items:center;justify-content:center;min-height:100vh;pad
 // API STATS — for Discord !qrperks command
 // ═══════════════════════════════════════════════════════════════
 
+
+// ═══════════════════════════════════════════════════════════════
+// ADMIN LEADS CSV EXPORT
+// ═══════════════════════════════════════════════════════════════
+
+async function handleAdminLeadsExport(request, env) {
+  if (!isAdminAuthed(request, env)) {
+    return Response.redirect(new URL('/admin/login', request.url).toString(), 302);
+  }
+  const url = new URL(request.url);
+  const filterStatus = url.searchParams.get('status') || '';
+  const filterLang   = url.searchParams.get('lang')   || '';
+
+  let query = 'select=*&order=created_at.desc';
+  if (filterStatus === 'active') query += '&status=neq.unsubscribed';
+  if (filterLang) query += `&lang=eq.${filterLang}`;
+
+  const rows = await sbGet(env, 'email_captures', query);
+
+  // Build CSV
+  const headers = ['email','phone','language','status','sms_unsubscribed','source','offer_clicked','created_at'];
+  const csvRows = [headers.join(',')];
+  for (const r of rows) {
+    const vals = [
+      csvEsc(r.email||''),
+      csvEsc(r.phone||''),
+      csvEsc(r.lang||'en'),
+      csvEsc(r.status||'active'),
+      r.sms_unsubscribed ? 'true' : 'false',
+      csvEsc(r.source||''),
+      csvEsc(r.offer_clicked||''),
+      csvEsc(r.created_at||''),
+    ];
+    csvRows.push(vals.join(','));
+  }
+  const csv = csvRows.join('\r\n');
+  const suffix = filterStatus || filterLang ? `-${filterStatus||''}${filterLang||''}` : '-all';
+  const filename = `qrperks-leads${suffix}-${new Date().toISOString().slice(0,10)}.csv`;
+  return new Response(csv, {
+    headers: {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+    }
+  });
+}
+
+function csvEsc(val) {
+  const s = String(val);
+  if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+    return '"' + s.replace(/"/g, '""') + '"';
+  }
+  return s;
+}
+
 async function handleApiStats(request, env) {
   try {
     const [drivers, scans, captures, commissions, convRows] = await Promise.all([
@@ -2354,6 +2548,15 @@ async function handleApiConversion(request, env) {
   const truckId         = subid.replace('qrp_', ''); // "qrp_t3" → "t3"
 
   try {
+    // Deduplication: skip if same subid+offer already processed within 60s
+    const cutoff = new Date(Date.now() - 60000).toISOString();
+    const dupe = await sbGetOne(env, 'conversions',
+      `subid=eq.${encodeURIComponent(subid)}&offer_name=eq.${encodeURIComponent(offer)}&created_at=gte.${cutoff}&select=id`);
+    if (dupe) {
+      console.log(`postback dedup: ${subid}/${offer} already processed within 60s`);
+      return new Response('OK', { status: 200 });
+    }
+
     // Resolve truck → driver
     const truck    = await sbGetOne(env, 'trucks', `id=eq.${truckId}&select=id,driver_id`);
     const driverId = truck?.driver_id || null;
@@ -2575,22 +2778,36 @@ setLang(getLang());
 function staticPage(slug) {
   if (slug==='privacy') return legalShell('Privacy Policy', `
 <h1><span class="en">Privacy Policy</span><span class="es">Política de Privacidad</span></h1>
-<p class="effective"><span class="en">Effective: January 1, 2025</span><span class="es">Vigente: 1 de enero de 2025</span></p>
+<p class="effective"><span class="en">Effective: January 1, 2025 · Last updated: April 2026</span><span class="es">Vigente: 1 de enero de 2025 · Actualizado: Abril 2026</span></p>
 <h2><span class="en">What We Collect</span><span class="es">Qué Recopilamos</span></h2>
-<p><span class="en">We collect information you provide directly (email address, phone number, name) and information collected automatically when you use our service (IP address, device type, pages visited, QR code scan data).</span>
-<span class="es">Recopilamos información que nos proporciona directamente (correo electrónico, teléfono, nombre) e información recopilada automáticamente (dirección IP, tipo de dispositivo, páginas visitadas, datos de escaneo de código QR).</span></p>
-<h2><span class="en">How We Use It</span><span class="es">Cómo Lo Usamos</span></h2>
-<p><span class="en">We use collected information to: operate our platform and track affiliate conversions; send you deals and alerts you've requested; process driver commission payments; comply with IRS reporting requirements; improve our service.</span>
-<span class="es">Usamos la información para: operar nuestra plataforma y rastrear conversiones de afiliados; enviarte ofertas y alertas solicitadas; procesar pagos de comisiones; cumplir con requisitos del IRS; mejorar nuestro servicio.</span></p>
-<h2><span class="en">Third-Party Services</span><span class="es">Servicios de Terceros</span></h2>
-<p><span class="en">We use Supabase (database), Cloudflare (infrastructure and analytics), Resend (email delivery), and affiliate networks. Each has its own privacy policy.</span>
-<span class="es">Usamos Supabase (base de datos), Cloudflare (infraestructura y análisis), Resend (envío de correo) y redes de afiliados. Cada uno tiene su propia política de privacidad.</span></p>
-<h2><span class="en">Information Sharing</span><span class="es">Compartir Información</span></h2>
-<p><span class="en">We do not sell your personal information. We share data with affiliate partners only as necessary to track conversions and process commissions.</span>
-<span class="es">No vendemos su información personal. Compartimos datos con socios afiliados solo para rastrear conversiones y procesar comisiones.</span></p>
-<h2><span class="en">Your Rights</span><span class="es">Sus Derechos</span></h2>
-<p><span class="en">You may request access to, correction of, or deletion of your personal data by emailing <a href="mailto:privacy@qr-perks.com">privacy@qr-perks.com</a>.</span>
-<span class="es">Puede solicitar acceso, corrección o eliminación de sus datos personales enviando un correo a <a href="mailto:privacy@qr-perks.com">privacy@qr-perks.com</a>.</span></p>`);
+<p><span class="en">We collect: (1) information you provide directly — email address, phone number, name; (2) information collected automatically — IP address (hashed), device type, pages visited, QR code scan data, language preference; (3) driver information — full name, tax ID (AES-256-GCM encrypted), mailing address, payment method details (encrypted), W9 data.</span>
+<span class="es">Recopilamos: (1) información directa — correo electrónico, teléfono, nombre; (2) automáticamente — IP (hash), tipo de dispositivo, páginas visitadas, datos de escaneo QR; (3) datos de conductores — nombre, identificación fiscal (encriptada), domicilio, método de pago.</span></p>
+<h2><span class="en">Cookies and Local Storage</span><span class="es">Cookies y Almacenamiento Local</span></h2>
+<p><span class="en">We use cookies and localStorage for: session authentication (driver login — HttpOnly, Secure cookie; 7-day expiry); language preference (localStorage); referral tracking (cookie — 30-day expiry); lead capture confirmation (localStorage). We do not use advertising cookies or third-party tracking pixels.</span>
+<span class="es">Usamos cookies y localStorage para: autenticación de sesión; preferencia de idioma; seguimiento de referidos; confirmación de captura de datos. No usamos cookies publicitarias ni píxeles de seguimiento de terceros.</span></p>
+<h2><span class="en">How We Use Your Information</span><span class="es">Cómo Usamos Su Información</span></h2>
+<p><span class="en">We use collected information to: operate our platform and track affiliate conversions; send deals and alerts you have requested; process driver commission payments; comply with IRS reporting requirements (1099-NEC); improve our service; deliver targeted advertising through affiliate partners where you have consented.</span>
+<span class="es">Usamos la información para: operar la plataforma; enviar ofertas y alertas solicitadas; procesar comisiones; cumplir con el IRS; mejorar el servicio; publicidad dirigida donde usted haya dado su consentimiento.</span></p>
+<h2><span class="en">Third-Party Service Providers</span><span class="es">Proveedores de Servicios de Terceros</span></h2>
+<p><span class="en">We use: Supabase (database hosting — encrypted at rest); Cloudflare (CDN, analytics, DDoS protection); Resend (transactional and marketing email delivery); MaxBounty, Commission Junction, and other affiliate networks (conversion tracking — subID only, no PII). Each provider has its own privacy policy.</span>
+<span class="es">Usamos: Supabase (base de datos); Cloudflare (CDN, analíticas); Resend (correo electrónico); MaxBounty y otras redes de afiliados (seguimiento de conversiones — solo subID, sin datos personales).</span></p>
+<h2><span class="en">Information Sharing and Sale</span><span class="es">Compartir y Venta de Información</span></h2>
+<p><span class="en">We do not sell your personal information to unrelated third parties. We may share your contact information (email, phone) with our affiliate marketing partners for the purpose of delivering relevant offers when you have consented to receive promotional communications. Driver tax and payment information is shared with the IRS as required by law.</span>
+<span class="es">No vendemos su información personal a terceros no relacionados. Podemos compartir información de contacto con socios de marketing cuando usted haya dado su consentimiento. La información fiscal de conductores se comparte con el IRS según la ley.</span></p>
+<h2><span class="en">Data Retention</span><span class="es">Retención de Datos</span></h2>
+<p><span class="en">Email and phone captures: retained for 3 years or until deletion is requested. Driver accounts: retained for 7 years after account closure for tax compliance (IRS requirement). Scan logs: retained for 2 years. IP hashes (non-reversible): retained for 90 days. W9 data (encrypted): retained for 7 years per IRS requirements.</span>
+<span class="es">Capturas de email/teléfono: 3 años o hasta solicitud de eliminación. Cuentas de conductores: 7 años por cumplimiento fiscal. Registros de escaneo: 2 años. Hashes de IP: 90 días. Datos W9: 7 años.</span></p>
+<h2><span class="en">California Residents — CCPA Rights</span><span class="es">Residentes de California — Derechos CCPA</span></h2>
+<p><span class="en">Under the California Consumer Privacy Act (CCPA), California residents have the right to: (1) Know what personal information we collect and how it is used; (2) Delete personal information (subject to certain exceptions); (3) Opt-out of the sale of personal information — we do not sell personal information; (4) Non-discrimination for exercising CCPA rights. To exercise these rights, email <a href="mailto:privacy@qr-perks.com">privacy@qr-perks.com</a> with the subject "CCPA Request."</span>
+<span class="es">Según la CCPA de California, los residentes tienen derecho a conocer, eliminar y optar por no vender su información personal. Para ejercer estos derechos, envíe un correo a <a href="mailto:privacy@qr-perks.com">privacy@qr-perks.com</a> con el asunto "CCPA Request."</span></p>
+<h2><span class="en">EEA / UK Residents — GDPR Rights</span><span class="es">Residentes del EEE / Reino Unido — Derechos GDPR</span></h2>
+<p><span class="en">If you are located in the European Economic Area or United Kingdom, you have rights under GDPR including: access, rectification, erasure ("right to be forgotten"), restriction of processing, data portability, and the right to object. Our lawful basis for processing is consent (for marketing communications) and legitimate interests (for service operation). To exercise GDPR rights, email <a href="mailto:privacy@qr-perks.com">privacy@qr-perks.com</a>.</span>
+<span class="es">Si se encuentra en el EEE o Reino Unido, tiene derechos según el GDPR: acceso, rectificación, eliminación y portabilidad de datos. Para ejercerlos, escriba a <a href="mailto:privacy@qr-perks.com">privacy@qr-perks.com</a>.</span></p>
+<h2><span class="en">Your Choices and Opt-Out</span><span class="es">Sus Opciones</span></h2>
+<p><span class="en">Email: Unsubscribe via any email footer link or <a href="/unsubscribe">here</a>. SMS: Reply STOP to any text message. Account deletion: Email <a href="mailto:privacy@qr-perks.com">privacy@qr-perks.com</a>. We honor all opt-out requests within 10 business days.</span>
+<span class="es">Correo electrónico: use el enlace en el pie del correo o <a href="/unsubscribe">aquí</a>. SMS: responda STOP. Eliminación de cuenta: <a href="mailto:privacy@qr-perks.com">privacy@qr-perks.com</a>.</span></p>
+<h2><span class="en">Contact</span><span class="es">Contacto</span></h2>
+<p><a href="mailto:privacy@qr-perks.com">privacy@qr-perks.com</a><br>${PHYSICAL_ADDRESS}</p>`);
 
   if (slug==='terms') return legalShell('Terms of Service', `
 <h1><span class="en">Terms of Service</span><span class="es">Términos de Servicio</span></h1>
