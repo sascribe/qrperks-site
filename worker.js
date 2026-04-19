@@ -227,6 +227,8 @@ async function route(request, env, ctx) {
   if (path === '/api/truck-name'   && method === 'POST')              return handleApiTruckName(request, env);
   if (path === '/api/save-qr-code' && method === 'POST')              return handleSaveQrCode(request, env);
   if (path === '/api/sms-webhook'  && method === 'POST')              return handleSmsWebhook(request, env);
+  if (path === '/api/conversion'            && method === 'GET')               return handleApiConversion(request, env);
+  if (path === '/admin/conversions/mark-paid' && method === 'POST')            return handleAdminConvMarkPaid(request, env);
 
   // Landing page
   if (path === '/') return handleHome(request, env, ctx);
@@ -1756,7 +1758,10 @@ function shareRef(){if(navigator.share){navigator.share({title:'Join QR Perks',t
 
 // ─── EARNINGS ───
 async function handleDriverEarnings(request, env, driver) {
-  const commissions = await sbGet(env, 'commissions', `driver_id=eq.${driver.id}&select=*&order=created_at.desc`);
+  const [commissions, driverConvs] = await Promise.all([
+    sbGet(env, 'commissions', `driver_id=eq.${driver.id}&select=*&order=created_at.desc`),
+    sbGet(env, 'conversions', `driver_id=eq.${driver.id}&select=*&order=created_at.desc&limit=100`),
+  ]);
   const now = new Date();
   const mStart = new Date(now.getFullYear(), now.getMonth(), 1);
   const thisMo = commissions.filter(c=>new Date(c.created_at)>=mStart).reduce((s,c)=>s+c.driver_amount_cents,0);
@@ -1803,7 +1808,25 @@ ${commissions.map(c=>`<tr>
 <td>${fmt$(c.driver_amount_cents||0)}</td>
 <td><span class="badge ${c.status==='paid'?'badge-green':c.status==='pending'?'badge-yellow':'badge-red'}">${c.status}</span></td>
 </tr>`).join('')}
-</table></div>`:'<div class="dsec"><p style="color:var(--sub);font-size:13px">No commissions yet.</p></div>'}`);
+</table></div>`:'<div class="dsec"><p style="color:var(--sub);font-size:13px">No commissions yet.</p></div>'}
+${driverConvs.length?`<div class="dsec">
+<h2>Conversion History</h2>
+<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:14px">
+  <div class="stat" style="flex:1;min-width:120px"><div class="stat-n">${driverConvs.length}</div><div class="stat-l">Total Conversions</div></div>
+  <div class="stat" style="flex:1;min-width:120px"><div class="stat-n">${fmt$(driverConvs.reduce((s,c)=>s+(c.commission_amount_cents||0),0))}</div><div class="stat-l">Total Earned</div></div>
+  <div class="stat" style="flex:1;min-width:120px"><div class="stat-n">${fmt$(driverConvs.filter(c=>c.status==='pending').reduce((s,c)=>s+(c.commission_amount_cents||0),0))}</div><div class="stat-l">Pending</div></div>
+  <div class="stat" style="flex:1;min-width:120px"><div class="stat-n">${fmt$(driverConvs.filter(c=>c.status==='paid').reduce((s,c)=>s+(c.commission_amount_cents||0),0))}</div><div class="stat-l">Paid Out</div></div>
+</div>
+<table><tr><th>Date</th><th>Offer</th><th>Payout</th><th>Your Commission (20%)</th><th>Status</th></tr>
+${driverConvs.map(c=>`<tr>
+<td style="font-size:12px;color:var(--sub)">${new Date(c.created_at).toLocaleDateString()}</td>
+<td style="font-size:13px">${c.offer_name||c.affiliate_id||'—'}</td>
+<td>${fmt$(c.gross_amount_cents||0)}</td>
+<td style="color:var(--acc)">${fmt$(c.commission_amount_cents||0)}</td>
+<td><span class="badge ${c.status==='paid'?'badge-green':c.status==='pending'?'badge-yellow':'badge-red'}">${c.status}</span></td>
+</tr>`).join('')}
+</table></div>`:''}
+`);
 }
 
 // ─── SETTINGS ───
@@ -1996,15 +2019,16 @@ async function handleAdminDashboard(request, env) {
   if (!isAdminAuthed(request, env)) return Response.redirect(new URL('/admin/login', request.url).toString(), 302);
 
   // Fetch all data defensively
-  let drivers=[], commissions=[], affiliates=[], captures=[], w9s=[], trucks=[];
+  let drivers=[], commissions=[], affiliates=[], captures=[], w9s=[], trucks=[], conversionRows=[];
   try {
-    [drivers, commissions, affiliates, captures, w9s, trucks] = await Promise.all([
+    [drivers, commissions, affiliates, captures, w9s, trucks, conversionRows] = await Promise.all([
       sbGet(env, 'drivers', 'select=*&order=created_at.desc'),
       sbGet(env, 'commissions', 'select=*&order=created_at.desc'),
       sbGet(env, 'affiliates', 'select=*&order=display_order.asc'),
       sbGet(env, 'email_captures', 'select=*&order=created_at.desc&limit=100'),
       sbGet(env, 'w9_submissions', 'select=id,driver_id,created_at,reviewed&order=created_at.desc'),
       sbGet(env, 'trucks', 'select=id,driver_id,status,truck_name&order=id.asc&limit=20'),
+      sbGet(env, 'conversions', 'select=*&order=created_at.desc&limit=200'),
     ]);
   } catch(e) { console.error('Admin dashboard fetch error:', e.message); }
 
@@ -2119,6 +2143,34 @@ ${captures.slice(0,60).map(c=>`<tr>
 <td style="color:var(--sub)">${c.source||'—'}</td>
 <td style="color:var(--sub)">${c.offer_clicked||'—'}</td>
 </tr>`).join('')||'<tr><td colspan="5" style="color:var(--sub);padding:12px 0">No leads yet</td></tr>'}
+</table></div>
+
+<div class="asec" id="conversions">
+<h2>MaxBounty Conversions</h2>
+${(()=>{
+  const totalRev = conversionRows.reduce((s,c)=>s+(c.gross_amount_cents||0),0);
+  const pendingComm = conversionRows.filter(c=>c.status==='pending').reduce((s,c)=>s+(c.commission_amount_cents||0),0);
+  const paidComm = conversionRows.filter(c=>c.status==='paid').reduce((s,c)=>s+(c.commission_amount_cents||0),0);
+  const byOffer = conversionRows.reduce((m,c)=>{const k=c.offer_name||'unknown';m[k]=(m[k]||0)+1;return m;},{});
+  return `<div class="stats-row" style="margin-bottom:16px">
+  <div class="astat"><div class="astat-n">${conversionRows.length}</div><div class="astat-l">Total</div></div>
+  <div class="astat"><div class="astat-n" style="color:var(--acc)">$${(totalRev/100).toFixed(2)}</div><div class="astat-l">Revenue</div></div>
+  <div class="astat"><div class="astat-n" style="color:#f59e0b">$${(pendingComm/100).toFixed(2)}</div><div class="astat-l">Commissions Owed</div></div>
+  <div class="astat"><div class="astat-n">$${(paidComm/100).toFixed(2)}</div><div class="astat-l">Commissions Paid</div></div>
+</div>
+${Object.entries(byOffer).map(([k,v])=>`<span style="display:inline-block;background:#1e1e2e;padding:3px 10px;border-radius:4px;font-size:12px;color:var(--sub);margin:2px 4px 2px 0">${k}: <strong style="color:var(--txt)">${v}</strong></span>`).join('')}`;
+})()}
+<table style="margin-top:14px"><tr><th>Date</th><th>Truck</th><th>Driver</th><th>Offer</th><th>Payout</th><th>Commission</th><th>Status</th><th style="text-align:right">Action</th></tr>
+${conversionRows.map(c=>{const drv=drivers.find(d=>d.id===c.driver_id);return`<tr>
+<td style="font-size:12px;color:var(--sub)">${new Date(c.created_at).toLocaleDateString()}</td>
+<td>${(c.truck_id||'—').toUpperCase()}</td>
+<td style="color:var(--sub);font-size:13px">${drv?drv.name:'—'}</td>
+<td style="color:var(--sub);font-size:12px">${c.offer_name||c.affiliate_id||'—'}</td>
+<td style="color:var(--acc)">$${((c.gross_amount_cents||0)/100).toFixed(2)}</td>
+<td style="color:#f59e0b">$${((c.commission_amount_cents||0)/100).toFixed(2)}</td>
+<td><span class="badge ${c.status==='paid'?'badge-green':c.status==='pending'?'badge-yellow':'badge-red'}">${c.status}</span></td>
+<td style="text-align:right">${c.status==='pending'?`<form action="/admin/conversions/mark-paid" method="POST" style="display:inline"><input type="hidden" name="conversion_id" value="${c.id}"><button class="btn btn-sm btn-outline" style="font-size:11px">Mark Paid</button></form>`:'—'}</td>
+</tr>`;}).join('')||'<tr><td colspan="8" style="color:var(--sub);padding:12px 0">No conversions yet</td></tr>'}
 </table></div>`);
 }
 
@@ -2156,6 +2208,14 @@ async function handleAdminMarkPaid(request, env) {
   const id = form.get('commission_id');
   if (id) await sbPatch(env, 'commissions', `id=eq.${id}`, { status:'paid', paid_at:new Date().toISOString() });
   return Response.redirect(new URL('/admin/dashboard#commissions', request.url).toString(), 302);
+}
+
+async function handleAdminConvMarkPaid(request, env) {
+  if (!isAdminAuthed(request, env)) return Response.redirect(new URL('/admin/login', request.url).toString(), 302);
+  const form = await request.formData();
+  const id = form.get('conversion_id');
+  if (id) await sbPatch(env, 'conversions', `id=eq.${id}`, { status:'paid', paid_at:new Date().toISOString() });
+  return Response.redirect(new URL('/admin/dashboard#conversions', request.url).toString(), 302);
 }
 
 async function handleAdminUpdateOffer(request, env) {
@@ -2226,11 +2286,12 @@ body{display:flex;align-items:center;justify-content:center;min-height:100vh;pad
 
 async function handleApiStats(request, env) {
   try {
-    const [drivers, scans, captures, commissions] = await Promise.all([
+    const [drivers, scans, captures, commissions, convRows] = await Promise.all([
       sbGet(env, 'drivers', 'select=id,status'),
       sbGet(env, 'scans', 'select=id,created_at&order=created_at.desc&limit=1000'),
       sbGet(env, 'email_captures', 'select=id,created_at&order=created_at.desc&limit=500'),
       sbGet(env, 'commissions', 'select=driver_amount_cents,status'),
+      sbGet(env, 'conversions', 'select=gross_amount_cents,commission_amount_cents,status,offer_name'),
     ]);
     const now = new Date();
     const day = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -2239,6 +2300,9 @@ async function handleApiStats(request, env) {
     const scansWeek  = scans.filter(s=>new Date(s.created_at)>=week).length;
     const leadsToday = captures.filter(c=>new Date(c.created_at)>=day).length;
     const pendingPay = commissions.filter(c=>c.status==='pending').reduce((s,c)=>s+(c.driver_amount_cents||0),0);
+    const totalRevCents = convRows.reduce((s,c)=>s+(c.gross_amount_cents||0),0);
+    const pendingCommCents = convRows.filter(c=>c.status==='pending').reduce((s,c)=>s+(c.commission_amount_cents||0),0);
+    const convsByOffer = convRows.reduce((m,c)=>{const k=c.offer_name||'unknown';m[k]=(m[k]||0)+1;return m;},{});
     return jsonOk({
       drivers_total: drivers.length,
       drivers_active: drivers.filter(d=>d.status==='active').length,
@@ -2247,11 +2311,119 @@ async function handleApiStats(request, env) {
       leads_total: captures.length,
       leads_today: leadsToday,
       commissions_pending_cents: pendingPay,
+      total_conversions: convRows.length,
+      total_revenue_cents: totalRevCents,
+      total_commissions_pending_cents: pendingCommCents,
+      conversions_by_offer: convsByOffer,
       as_of: now.toISOString()
     });
   } catch(e) {
     return jsonOk({ error: e.message }, 500);
   }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// MAXBOUNTY POSTBACK — /api/conversion
+// ═══════════════════════════════════════════════════════════════
+
+async function handleApiConversion(request, env) {
+  const url    = new URL(request.url);
+  const subid  = url.searchParams.get('subid')  || '';
+  const offer  = url.searchParams.get('offer')  || '';
+  const payout = url.searchParams.get('payout') || '';
+  const token  = url.searchParams.get('token')  || '';
+
+  // Token check — prevent spoofed postbacks
+  if (!env.POSTBACK_SECRET || token !== env.POSTBACK_SECRET) {
+    return new Response('Forbidden', { status: 403 });
+  }
+
+  // Validate subid format: qrp_t1..qrp_t50
+  if (!/^qrp_t[0-9]+$/.test(subid)) {
+    return new Response('Bad Request: invalid subid', { status: 400 });
+  }
+
+  // Validate payout
+  const payoutFloat = parseFloat(payout);
+  if (isNaN(payoutFloat) || payoutFloat <= 0) {
+    return new Response('Bad Request: invalid payout', { status: 400 });
+  }
+
+  const payoutCents     = Math.round(payoutFloat * 100);
+  const commissionCents = Math.floor(payoutCents * 0.20);
+  const truckId         = subid.replace('qrp_', ''); // "qrp_t3" → "t3"
+
+  try {
+    // Resolve truck → driver
+    const truck    = await sbGetOne(env, 'trucks', `id=eq.${truckId}&select=id,driver_id`);
+    const driverId = truck?.driver_id || null;
+
+    if (!truck) {
+      console.log(`postback: unknown truck ${truckId} — logging conversion without driver`);
+    }
+
+    // Write conversion row
+    const convRow = {
+      truck_id:              truckId,
+      driver_id:             driverId,
+      offer_name:            offer,
+      affiliate_id:          offer,
+      gross_amount_cents:    payoutCents,
+      commission_amount_cents: commissionCents,
+      subid:                 subid,
+      status:                'pending',
+      commission_calculated: false,
+    };
+    const conv = await sbPost(env, 'conversions', convRow);
+
+    if (driverId) {
+      // Create commissions row (powers driver dashboard history)
+      await sbPost(env, 'commissions', {
+        driver_id:           driverId,
+        conversion_id:       conv?.id || null,
+        type:                'truck_conversion',
+        gross_amount_cents:  payoutCents,
+        driver_amount_cents: commissionCents,
+        status:              'pending',
+      });
+
+      // Mark conversion commission_calculated so engine doesn't double-process
+      if (conv?.id) {
+        await sbPatch(env, 'conversions', `id=eq.${conv.id}`, { commission_calculated: true });
+      }
+
+      // Update driver total_earnings_cents
+      const driver  = await sbGetOne(env, 'drivers', `id=eq.${driverId}&select=total_earnings_cents`);
+      const current = driver?.total_earnings_cents || 0;
+      await sbPatch(env, 'drivers', `id=eq.${driverId}`, {
+        total_earnings_cents: current + commissionCents,
+      });
+
+      // Referral override (10% to referrer)
+      const refs = await sbGet(env, 'referrals', `referred_driver_id=eq.${driverId}&select=referrer_driver_id`);
+      if (refs[0]?.referrer_driver_id) {
+        const refAmt = Math.floor(payoutCents * 0.10);
+        await sbPost(env, 'commissions', {
+          driver_id:           refs[0].referrer_driver_id,
+          conversion_id:       conv?.id || null,
+          type:                'referral_override',
+          gross_amount_cents:  payoutCents,
+          driver_amount_cents: refAmt,
+          status:              'pending',
+        });
+        const referrer    = await sbGetOne(env, 'drivers', `id=eq.${refs[0].referrer_driver_id}&select=total_earnings_cents`);
+        const refCurrent  = referrer?.total_earnings_cents || 0;
+        await sbPatch(env, 'drivers', `id=eq.${refs[0].referrer_driver_id}`, {
+          total_earnings_cents: refCurrent + refAmt,
+        });
+      }
+    }
+  } catch(e) {
+    // Log but always return 200 — MaxBounty retries on non-200
+    console.error('handleApiConversion error:', e.message);
+  }
+
+  return new Response('OK', { status: 200 });
 }
 
 // ═══════════════════════════════════════════════════════════════
