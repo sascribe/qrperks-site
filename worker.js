@@ -2362,12 +2362,11 @@ async function handleApiConversion(request, env) {
       console.log(`postback: unknown truck ${truckId} — logging conversion without driver`);
     }
 
-    // Write conversion row
+    // Write conversion row (affiliate_id omitted — FK to affiliates table; use offer_name instead)
     const convRow = {
       truck_id:              truckId,
       driver_id:             driverId,
       offer_name:            offer,
-      affiliate_id:          offer,
       gross_amount_cents:    payoutCents,
       commission_amount_cents: commissionCents,
       subid:                 subid,
