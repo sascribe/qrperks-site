@@ -1,7 +1,7 @@
 // QR-Perks Cloudflare Worker — v5 Full Platform Fix 2026-04-13
 // Env: SUPABASE_URL, SUPABASE_SECRET, ADMIN_PASSWORD,
 // PHYSICAL_ADDRESS — update to your registered business address (required by CAN-SPAM)
-const PHYSICAL_ADDRESS = '548 Market St PMB 96203, San Francisco, CA 94104';  // ← UPDATE THIS
+const PHYSICAL_ADDRESS = '1945 S. Laurel Pl., Ontario, CA 91762';
 //      RESEND_API_KEY, DRIVER_JWT_SECRET, W9_ENCRYPTION_KEY
 
 const FALLBACK_AFFILIATES = [
@@ -739,6 +739,8 @@ ${DS}
 .hero-form input{flex:1;min-width:0}
 .hero-form .btn{flex-shrink:0;width:100%}
 @media(min-width:480px){.hero-form .btn{width:auto}}
+.tcpa-disc{font-size:10px;color:#555;line-height:1.5;margin:6px 0 8px;text-align:left}
+.tcpa-disc a{color:#666;text-decoration:underline}
 /* Featured card */
 .featured-card{padding:24px;cursor:pointer;transition:border-color .2s,transform .1s;margin:20px;border-color:#00ff8840}
 .featured-card:hover{border-color:var(--acc);transform:translateY(-2px)}
@@ -802,8 +804,8 @@ ${DS}
   <div class="br-sub"><span class="en">Get alerts when new deals drop:</span><span class="es">Recibe alertas cuando lleguen nuevas ofertas:</span></div>
   <div class="br-form">
     <input type="email" id="br-email" autocomplete="email">
-    <input type="tel" id="br-phone" autocomplete="tel">
-    <p style="font-size:10px;color:#666;margin:4px 0 8px;line-height:1.4"><span class="en">By providing your phone number, you consent to receive promotional text messages from QR Perks. Msg &amp; data rates may apply. Reply STOP to unsubscribe.</span><span class="es">Al proporcionar su número, acepta recibir mensajes promocionales. Tarifas aplican. Responda STOP para cancelar.</span></p>
+    <input type="tel" id="br-phone" autocomplete="tel" placeholder="Phone number (optional)">
+    <p class="tcpa-disc" style="font-size:10px;color:#555;line-height:1.5;margin:6px 0 8px"><span class="en">By tapping 'Alert Me + Continue', you expressly consent to receive recurring automated marketing text messages and emails from QR Perks at the contact info provided. Consent is not a condition of purchase. Msg frequency varies. Msg &amp; data rates may apply. Reply STOP to opt out, HELP for help. <a href="/leads-terms" style="color:#666">Terms</a> | <a href="/privacy" style="color:#666">Privacy Policy</a></span><span class="es">Al tocar 'Notifícarme + Continuar', usted consiente expresamente recibir mensajes de texto de marketing automatizados recurrentes y correos de QR Perks al número y correo proporcionados. El consentimiento no es condición de compra. La frecuencia varía. Tarifas aplican. Responda STOP para cancelar, HELP para ayuda. <a href="/leads-terms" style="color:#666">Términos</a> | <a href="/privacy" style="color:#666">Privacidad</a></span></p>
     <button class="br-btn" id="br-alert"><span class="en">Alert Me + Continue →</span><span class="es">Notifícarme + Continuar →</span></button>
     <button class="br-skip" id="br-skip"><span class="en">No Thank You — take me to the offer →</span><span class="es">No Gracias — llevarme a la oferta →</span></button>
   </div>
@@ -821,8 +823,12 @@ ${DS}
   <h1><span class="en">Scan. <span class="acc">Save.</span> Score.</span><span class="es">Escanea. <span class="acc">Ahorra.</span> Gana.</span></h1>
   <p class="hero-sub"><span class="en">Exclusive deals delivered straight to your phone — just scan the QR code on the truck.</span><span class="es">Ofertas exclusivas directo a tu teléfono — solo escanea el código QR del camión.</span></p>
   <div id="hero-capture-wrap">
-  <form class="hero-form" onsubmit="heroCapture(event)">
-    <input type="email" id="hero-email" name="email" required placeholder="Enter your email">
+  <form class="hero-form" onsubmit="heroCapture(event)" style="flex-direction:column;align-items:stretch">
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <input type="email" id="hero-email" name="email" required placeholder="Enter your email" style="flex:1;min-width:180px">
+      <input type="tel" id="hero-phone" name="phone" placeholder="Phone number (optional)" autocomplete="tel" style="flex:1;min-width:160px">
+    </div>
+    <p class="tcpa-disc"><span class="en">By tapping 'Get My Deal', you expressly consent to receive recurring automated marketing text messages and emails from QR Perks at the contact info provided. Consent is not a condition of purchase. Msg frequency varies. Msg &amp; data rates may apply. Reply STOP to opt out, HELP for help. <a href="/leads-terms">Terms</a> | <a href="/privacy">Privacy Policy</a></span><span class="es">Al tocar 'Obtener Mi Oferta', usted consiente expresamente recibir mensajes de texto de marketing automatizados recurrentes y correos electrónicos de QR Perks. El consentimiento no es condición de compra. La frecuencia varía. Tarifas aplican. Responda STOP para cancelar, HELP para ayuda. <a href="/leads-terms">Términos</a> | <a href="/privacy">Política de Privacidad</a></span></p>
     <button type="submit" class="btn"><span class="en">Get My Deal</span><span class="es">Obtener Mi Oferta</span></button>
   </form>
   <div id="hero-thankyou" style="display:none;text-align:center;padding:16px 0;color:var(--acc);font-size:16px;font-weight:600"><span class="en">✅ You're on the list! Check your inbox.</span><span class="es">✅ ¡Estás en la lista! Revisa tu bandeja de entrada.</span></div>
@@ -894,6 +900,8 @@ function setLang(l){
   if(bp)bp.placeholder=l==='en'?'Phone for SMS alerts (optional)':'Teléfono para SMS (opcional)';
   const hi=document.getElementById('hero-email');
   if(hi)hi.placeholder=l==='en'?'Enter your email':'Ingresa tu correo';
+  const hp=document.getElementById('hero-phone');
+  if(hp)hp.placeholder=l==='en'?'Phone number (optional)':'Número de teléfono (opcional)';
 }
 setLang(getLang());
 
@@ -973,9 +981,10 @@ function heroCapture(e){
   e.preventDefault();
   const email=document.getElementById('hero-email').value.trim();
   if(!email) return;
+  const phone=(document.getElementById('hero-phone')?.value||'').trim()||null;
   const lang=getLang();
   fetch('/api/email-capture',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({email,source:TRUCK_ID||'hero',offer_clicked:'signup',lang})}).then(r=>r.json()).then(d=>{
+    body:JSON.stringify({email,phone,source:TRUCK_ID||'hero',offer_clicked:'signup',lang})}).then(r=>r.json()).then(d=>{
     if(d.ok){
       setLeadCapture();
       const w=document.getElementById('hero-capture-wrap');const ty=document.getElementById('hero-thankyou');
@@ -1100,6 +1109,7 @@ async function handleDriverSignupPage(request, env) {
   <div class="form-group"><label>Password (min 8 characters)</label><input type="password" id="pw" required minlength="8" autocomplete="new-password"></div>
   <div class="form-group"><label>Confirm Password</label><input type="password" id="pw2" required minlength="8" autocomplete="new-password"></div>
   ${ref?`<div class="form-group"><label>Referred By</label><input type="text" id="ref" value="${ref}" readonly style="color:var(--acc);opacity:.8"></div>`:'<div class="form-group"><label>Referral Code (optional)</label><input type="text" id="ref"></div>'}
+  <p style="font-size:10px;color:#555;line-height:1.5;margin:12px 0 8px;padding:10px;background:#0f0f18;border-radius:8px;border:1px solid #1e1e2e">By clicking 'Apply Now', you expressly consent to receive automated text messages and emails from QR Perks at the contact info provided (for account notifications, payout alerts, and platform updates). Consent is not a condition of receiving commissions. Msg &amp; data rates may apply. Reply STOP to opt out. <a href="/privacy" style="color:#666">Privacy Policy</a></p>
   <button class="btn btn-full" id="sbtn" onclick="doSignup()">Apply Now →</button>
 </div>
 <div class="auth-links">Already have an account? <a href="/driver/login">Log in</a></div>`,
@@ -2804,8 +2814,14 @@ function staticPage(slug) {
 <p><span class="en">If you are located in the European Economic Area or United Kingdom, you have rights under GDPR including: access, rectification, erasure ("right to be forgotten"), restriction of processing, data portability, and the right to object. Our lawful basis for processing is consent (for marketing communications) and legitimate interests (for service operation). To exercise GDPR rights, email <a href="mailto:privacy@qr-perks.com">privacy@qr-perks.com</a>.</span>
 <span class="es">Si se encuentra en el EEE o Reino Unido, tiene derechos según el GDPR: acceso, rectificación, eliminación y portabilidad de datos. Para ejercerlos, escriba a <a href="mailto:privacy@qr-perks.com">privacy@qr-perks.com</a>.</span></p>
 <h2><span class="en">Your Choices and Opt-Out</span><span class="es">Sus Opciones</span></h2>
-<p><span class="en">Email: Unsubscribe via any email footer link or <a href="/unsubscribe">here</a>. SMS: Reply STOP to any text message. Account deletion: Email <a href="mailto:privacy@qr-perks.com">privacy@qr-perks.com</a>. We honor all opt-out requests within 10 business days.</span>
-<span class="es">Correo electrónico: use el enlace en el pie del correo o <a href="/unsubscribe">aquí</a>. SMS: responda STOP. Eliminación de cuenta: <a href="mailto:privacy@qr-perks.com">privacy@qr-perks.com</a>.</span></p>
+<p><span class="en">Email: Unsubscribe via any email footer link or <a href="/unsubscribe">here</a>. SMS: Reply STOP to any text message to immediately opt out. Opting out of SMS does not affect your email subscription or any other communication, and does not affect your ability to access deals. Account deletion: Email <a href="mailto:privacy@qr-perks.com">privacy@qr-perks.com</a>. We honor all opt-out requests within 10 business days (SMS opt-outs are immediate).</span>
+<span class="es">Correo electrónico: use el enlace en el pie del correo o <a href="/unsubscribe">aquí</a>. SMS: responda STOP para cancelar inmediatamente. Cancelar SMS no afecta otras comunicaciones. Eliminación de cuenta: <a href="mailto:privacy@qr-perks.com">privacy@qr-perks.com</a>.</span></p>
+<h2><span class="en">SMS / Text Message Communications</span><span class="es">Comunicaciones por Mensaje de Texto (SMS)</span></h2>
+<p><span class="en">If you provide your phone number and consent to SMS communications, you may receive recurring automated marketing text messages from QR Perks. Messages may include: exclusive deal alerts, sweepstakes notifications, promotional offers from our affiliate partners, and account notifications. Message frequency varies (up to 4–8 per month). Message &amp; data rates may apply. <strong>To opt out of SMS at any time, reply STOP to any message.</strong> You will receive one confirmation and no further messages. Opting out of SMS does not affect email communications or your access to deals. Reply HELP for assistance or contact <a href="mailto:support@qr-perks.com">support@qr-perks.com</a>. For full SMS terms see <a href="/leads-terms">Consumer Data Terms</a>.</span>
+<span class="es">Si proporciona su teléfono y consiente mensajes SMS, puede recibir mensajes de texto de marketing automatizados recurrentes de QR Perks, incluidas alertas de ofertas y notificaciones de sorteos. Frecuencia: hasta 4–8 por mes. Tarifas aplican. <strong>Para cancelar SMS en cualquier momento, responda STOP.</strong> Cancelar SMS no afecta el correo electrónico ni el acceso a ofertas.</span></p>
+<h2><span class="en">Communications Recording Policy (CIPA)</span><span class="es">Política de Grabación de Comunicaciones (CIPA)</span></h2>
+<p><span class="en">We do not record telephone calls without the consent of all parties. Automated text messages are sent only to users who have provided express written consent as described in this policy and our <a href="/leads-terms">Consumer Data Terms</a>. We do not monitor or record text message replies except as necessary to process opt-out requests (STOP/UNSUBSCRIBE commands).</span>
+<span class="es">No grabamos llamadas telefónicas sin el consentimiento de todas las partes. Los mensajes de texto automatizados se envían únicamente a usuarios que han dado su consentimiento expreso por escrito. No monitoreamos ni grabamos respuestas de texto excepto para procesar solicitudes de cancelación (comandos STOP/UNSUBSCRIBE).</span></p>
 <h2><span class="en">Contact</span><span class="es">Contacto</span></h2>
 <p><a href="mailto:privacy@qr-perks.com">privacy@qr-perks.com</a><br>${PHYSICAL_ADDRESS}</p>`);
 
@@ -2890,18 +2906,33 @@ async function acceptContractor(){
 <span class="es">Has sido eliminado de las comunicaciones de correo de QR Perks. Para volver a suscribirte, escríbenos a <a href="mailto:support@qr-perks.com">support@qr-perks.com</a>.</span></p>`);
 
   if (slug==='leads-terms') return legalShell('Consumer Data Terms', `
-<h1><span class="en">Consumer Data Terms</span><span class="es">Términos de Datos del Consumidor</span></h1>
-<p class="effective"><span class="en">Effective: January 1, 2025</span><span class="es">Vigente: 1 de enero de 2025</span></p>
-<h2><span class="en">Data Collection</span><span class="es">Recopilación de Datos</span></h2>
-<p><span class="en">By submitting your email address or phone number on this site, you consent to receiving offers and alerts from QR Perks and our advertising partners. Message frequency varies. Message &amp; data rates may apply.</span>
-<span class="es">Al enviar su correo electrónico o número de teléfono en este sitio, usted consiente recibir ofertas y alertas de QR Perks y nuestros socios publicitarios. La frecuencia de mensajes varía. Se pueden aplicar tarifas de mensajes y datos.</span></p>
-<h2><span class="en">Opt-Out</span><span class="es">Cancelar Suscripción</span></h2>
-<p><span class="en">You may unsubscribe at any time by clicking the unsubscribe link in any email or replying STOP to any SMS. To request deletion of your data, email <a href="mailto:privacy@qr-perks.com">privacy@qr-perks.com</a>.</span>
-<span class="es">Puede cancelar la suscripción en cualquier momento haciendo clic en el enlace de cancelación en cualquier correo electrónico o respondiendo STOP a cualquier SMS.</span></p>
+<h1><span class="en">Consumer Data Terms &amp; SMS Consent</span><span class="es">Términos de Datos del Consumidor y Consentimiento SMS</span></h1>
+<p class="effective"><span class="en">Effective: January 1, 2025 · Updated: April 2026</span><span class="es">Vigente: 1 de enero de 2025 · Actualizado: Abril 2026</span></p>
+<p><a href="/privacy">Privacy Policy</a> · <a href="mailto:privacy@qr-perks.com">privacy@qr-perks.com</a></p>
+<h2><span class="en">What You Are Consenting To</span><span class="es">A Qué Está Consintiendo</span></h2>
+<p><span class="en">By submitting your email address and/or phone number on QR Perks, you expressly consent to receive recurring automated marketing text messages (SMS/MMS) and marketing emails from QR Perks and our affiliate advertising partners at the contact information provided. This includes exclusive deals, sweepstakes entries, promotional offers, and deal alerts.</span>
+<span class="es">Al enviar su correo y/o teléfono en QR Perks, usted consiente expresamente recibir mensajes de texto de marketing automatizados recurrentes (SMS/MMS) y correos de marketing de QR Perks y nuestros socios afiliados, incluyendo ofertas exclusivas, sorteos y alertas de descuentos.</span></p>
+<h2><span class="en">Message Frequency</span><span class="es">Frecuencia de Mensajes</span></h2>
+<p><span class="en">Message frequency varies. You may receive up to 4–8 messages per month. We will only send messages when relevant deals or alerts are available.</span>
+<span class="es">La frecuencia de mensajes varía. Puede recibir hasta 4–8 mensajes por mes. Solo enviaremos mensajes cuando haya ofertas o alertas relevantes disponibles.</span></p>
+<h2><span class="en">Consent Is Not Required for Purchase</span><span class="es">El Consentimiento No Es Condición de Compra</span></h2>
+<p><span class="en"><strong>Providing your phone number or email is optional and is not required to access any offer or sweepstakes on this site. Consent to receive marketing communications is not a condition of any purchase or service.</strong></span>
+<span class="es"><strong>Proporcionar su teléfono o correo es opcional y no es requisito para acceder a ninguna oferta en este sitio. El consentimiento no es condición de ninguna compra o servicio.</strong></span></p>
+<h2><span class="en">Message &amp; Data Rates</span><span class="es">Tarifas de Mensajes y Datos</span></h2>
+<p><span class="en">Message and data rates may apply. Contact your wireless carrier for details about your plan.</span>
+<span class="es">Se pueden aplicar tarifas de mensajes y datos. Consulte a su operador inalámbrico para conocer los detalles de su plan.</span></p>
+<h2><span class="en">How to Opt Out</span><span class="es">Cómo Cancelar la Suscripción</span></h2>
+<p><span class="en"><strong>SMS:</strong> Reply STOP to any text message to immediately unsubscribe. Reply HELP for assistance. After opting out, you will receive one final confirmation message and no further messages.<br>
+<strong>Email:</strong> Click the unsubscribe link in the footer of any email, or visit <a href="/unsubscribe">/unsubscribe</a>.<br>
+<strong>Data deletion:</strong> Email <a href="mailto:privacy@qr-perks.com">privacy@qr-perks.com</a> to request deletion of your contact information.</span>
+<span class="es"><strong>SMS:</strong> Responda STOP a cualquier mensaje de texto para cancelar inmediatamente. Responda HELP para asistencia.<br>
+<strong>Correo electrónico:</strong> Haga clic en el enlace de cancelación en el pie del correo o visite <a href="/unsubscribe">/unsubscribe</a>.<br>
+<strong>Eliminación de datos:</strong> Envíe un correo a <a href="mailto:privacy@qr-perks.com">privacy@qr-perks.com</a>.</span></p>
 <h2><span class="en">Partner Sharing</span><span class="es">Compartir con Socios</span></h2>
-<p><span class="en">Your contact information may be shared with our affiliate marketing partners for the purpose of delivering relevant offers. We do not sell your data to unrelated third parties.</span>
-<span class="es">Su información de contacto puede ser compartida con nuestros socios de marketing de afiliados para entregar ofertas relevantes. No vendemos sus datos a terceros no relacionados.</span></p>
-<p><a href="mailto:privacy@qr-perks.com">privacy@qr-perks.com</a> · <a href="/privacy">Privacy Policy</a></p>`);
+<p><span class="en">Your contact information may be shared with our affiliate marketing partners for the purpose of delivering relevant offers. We do not sell your data to unrelated third parties. See our <a href="/privacy">Privacy Policy</a> for full details.</span>
+<span class="es">Su información de contacto puede compartirse con nuestros socios de marketing de afiliados para entregar ofertas relevantes. No vendemos sus datos a terceros no relacionados. Consulte nuestra <a href="/privacy">Política de Privacidad</a> para más detalles.</span></p>
+<h2><span class="en">Contact</span><span class="es">Contacto</span></h2>
+<p><a href="mailto:privacy@qr-perks.com">privacy@qr-perks.com</a><br>${PHYSICAL_ADDRESS}</p>`);
 
   return html404();
 }
@@ -2964,7 +2995,7 @@ async function handleSmsWebhook(request, env) {
         body: JSON.stringify({ sms_unsubscribed:true, sms_unsubscribed_at:new Date().toISOString() })
       }).catch(()=>{});
       // Respond with Twilio-compatible TwiML confirmation
-      return new Response(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>You have been unsubscribed from QR Perks SMS. No further messages will be sent. Reply START to re-subscribe.</Message></Response>`, {
+      return new Response(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>QR Perks: You have been unsubscribed. You will receive no further messages. Reply START to resubscribe.</Message></Response>`, {
         headers:{'Content-Type':'text/xml'}
       });
     }
