@@ -736,7 +736,8 @@ ${DS}
 .hero{padding:32px 20px 24px;text-align:center;max-width:600px;margin:0 auto;overflow:visible}
 .hero h1{font-size:clamp(28px,7vw,44px);font-weight:900;letter-spacing:-1px;line-height:1.1;margin-bottom:12px}
 .hero h1 .acc{color:var(--acc)}
-.hero-sub{color:var(--sub);font-size:16px;line-height:1.6;margin-bottom:28px;max-width:420px;margin-left:auto;margin-right:auto;overflow:visible}
+.hero-sub{color:var(--sub);font-size:16px;line-height:1.6;margin-bottom:24px;max-width:480px;margin-left:auto;margin-right:auto;overflow:visible}
+#hero-capture-wrap{overflow:visible;max-height:none}
 .hero-form{display:flex;gap:10px;max-width:400px;margin:0 auto;flex-direction:column}
 @media(min-width:480px){.hero-form{flex-direction:row}}
 .hero-form input{flex:1;min-width:0}
@@ -806,7 +807,7 @@ ${DS}
   <div class="br-prog"><div class="br-fill" id="br-fill"></div></div>
   <div class="br-sub"><span class="en">Get alerts when new deals drop:</span><span class="es">Recibe alertas cuando lleguen nuevas ofertas:</span></div>
   <div class="br-form">
-    <input type="email" id="br-email" autocomplete="email">
+    <input type="email" id="br-email" autocomplete="email" placeholder="Enter your email (optional)">
     <input type="tel" id="br-phone" autocomplete="tel" placeholder="Phone number (optional)">
     <p class="tcpa-disc" style="font-size:10px;color:#555;line-height:1.5;margin:6px 0 8px"><span class="en">By tapping 'Alert Me + Continue', you expressly consent to receive recurring automated marketing text messages and emails from QR Perks at the contact info provided. Consent is not a condition of purchase. Msg frequency varies. Msg &amp; data rates may apply. Reply STOP to opt out, HELP for help. <a href="/leads-terms" style="color:#666">Terms</a> | <a href="/privacy" style="color:#666">Privacy Policy</a></span><span class="es">Al tocar 'Notifícarme + Continuar', usted consiente expresamente recibir mensajes de texto de marketing automatizados recurrentes y correos de QR Perks al número y correo proporcionados. El consentimiento no es condición de compra. La frecuencia varía. Tarifas aplican. Responda STOP para cancelar, HELP para ayuda. <a href="/leads-terms" style="color:#666">Términos</a> | <a href="/privacy" style="color:#666">Privacidad</a></span></p>
     <button class="br-btn" id="br-alert"><span class="en">Alert Me + Continue →</span><span class="es">Notifícarme + Continuar →</span></button>
@@ -832,7 +833,7 @@ ${DS}
       <input type="tel" id="hero-phone" name="phone" placeholder="Phone number (optional)" autocomplete="tel" style="flex:1;min-width:160px">
     </div>
     <p class="tcpa-disc"><span class="en">By tapping 'Get My Deal', you expressly consent to receive recurring automated marketing text messages and emails from QR Perks at the contact info provided. Consent is not a condition of purchase. Msg frequency varies. Msg &amp; data rates may apply. Reply STOP to opt out, HELP for help. <a href="/leads-terms">Terms</a> | <a href="/privacy">Privacy Policy</a></span><span class="es">Al tocar 'Obtener Mi Oferta', usted consiente expresamente recibir mensajes de texto de marketing automatizados recurrentes y correos electrónicos de QR Perks. El consentimiento no es condición de compra. La frecuencia varía. Tarifas aplican. Responda STOP para cancelar, HELP para ayuda. <a href="/leads-terms">Términos</a> | <a href="/privacy">Política de Privacidad</a></span></p>
-    <button type="submit" class="btn"><span class="en">Get My Deal</span><span class="es">Obtener Mi Oferta</span></button>
+    <button type="button" class="btn" onclick="heroGetMyDeal()"><span class="en">Get My Deal</span><span class="es">Obtener Mi Oferta</span></button>
   </form>
   <div id="hero-thankyou" style="display:none;text-align:center;padding:16px 0;color:var(--acc);font-size:16px;font-weight:600"><span class="en">✅ You're on the list! Check your inbox.</span><span class="es">✅ ¡Estás en la lista! Revisa tu bandeja de entrada.</span></div>
   </div>
@@ -1001,6 +1002,16 @@ function heroCapture(e){
   }).catch(()=>{});
 }
 const affiliates=${JSON.stringify(affiliates.map(a=>({id:a.id,prize_description:a.prize_description,prize_description_es:a.prize_description_es,name:a.name})))};
+function heroGetMyDeal(){
+  if(hasLeadCapture()){
+    if(affiliates&&affiliates.length) window.location.href='/go/'+affiliates[0].id+'?t='+(TRUCK_ID||'web');
+    return;
+  }
+  if(affiliates&&affiliates.length){
+    var a=affiliates[0];
+    openBridge(a.id, TRUCK_ID||'web', a.prize_description||a.name, a.prize_description_es||a.name);
+  }
+}
 </script>
 </body></html>`);
 }
@@ -1337,7 +1348,7 @@ async function handleDriverDashboard(request, env, driver) {
   const step2Done = !!driver.w9_submitted_at || !!driver.w9_submitted;
   const step3Done = !!(driver.payment_method_type || driver.payment_method);
   const allStepsDone = step1Done && step2Done && step3Done;
-  const stepsHtml = !allStepsDone ? `<div class="dsec" style="border-color:#f59e0b40">
+  const stepsHtml = `<div class="dsec" style="border-color:${allStepsDone?'#00ff8840':'#f59e0b40'}">
   <h2>Required Before Payout</h2>
   <div style="display:flex;flex-direction:column;gap:10px;margin-top:4px">
     <div style="display:flex;align-items:center;gap:12px;padding:12px;background:${step1Done?'#00ff8808':'#1e1e2e'};border:1px solid ${step1Done?'#00ff8840':'#2e2e3e'};border-radius:10px">
@@ -1365,7 +1376,8 @@ async function handleDriverDashboard(request, env, driver) {
       ${!step3Done?'<button class="btn btn-sm btn-outline" style="font-size:12px;flex-shrink:0" onclick="document.getElementById(\'pay-modal\').style.display=\'flex\'">Add Payment</button>':'<span style="color:var(--acc);font-size:13px;font-weight:700">Done</span>'}
     </div>
   </div>
-</div>` : '';
+${allStepsDone?`<div style="margin-top:12px;padding-top:12px;border-top:1px solid #00ff8820"><p style="color:#00ff88;font-size:13px;font-weight:700">✅ All set — eligible for payout!</p><p style="color:var(--sub);font-size:12px">Payments are processed by your company. See Payment History below.</p></div>`:""}
+</div>`;
 
   return dashShell('Dashboard', 'dashboard', `
 <h1>Dashboard</h1>
@@ -1414,6 +1426,10 @@ ${stepsHtml}
   </div>
   <div style="font-size:11px;color:var(--sub);margin-top:10px" id="d-period-label">This week</div>
 </div>
+<div class="dsec" style="padding:14px 18px;margin-bottom:12px">
+  <div style="font-size:12px;font-weight:700;margin-bottom:8px;color:var(--sub)">PER TRUCK <span id="d-truck-period-lbl" style="font-weight:400">— This week</span></div>
+  <div id="d-truck-stats">${trucks.map(t=>'<div class="d-tr-row" data-truck="'+t.id+'" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #12121a">'+'<span style="font-size:12px;font-weight:700;color:var(--acc);min-width:34px">'+t.id.toUpperCase()+'</span>'+'<span style="font-size:11px;color:var(--sub);flex:1">'+( t.truck_name||'—')+'</span>'+'<span id="ts-c-'+t.id+'" style="font-size:11px;color:var(--sub)">—</span>'+'<span id="ts-v-'+t.id+'" style="font-size:11px;color:var(--sub)">—</span>'+'<span id="ts-e-'+t.id+'" style="font-size:11px;color:var(--acc);font-weight:700">$0.00</span>'+"</div>").join('')}  </div>
+</div>
 <div class="stats">
   <div class="stat"><div class="stat-n">${driverScans.length}</div><div class="stat-l">Total Scans</div></div>
   <div class="stat"><div class="stat-n">${commissions.filter(c=>c.conversion_id).length}</div><div class="stat-l">Total Convs</div></div>
@@ -1442,9 +1458,7 @@ ${recent.length?`<div class="dsec">
   </tr>`).join('')}
   </table></div>`:''}
 ${driverPayouts.length ? '<div class="dsec"><h2>Payment History</h2>'+'<p style="font-size:13px;color:var(--sub);margin-bottom:12px">'+driverPayouts.length+' payout'+(driverPayouts.length!==1?'s':'')+' recorded</p>'+'<div style="overflow-x:auto"><table style="min-width:500px">'+'<tr><th>Date Paid</th><th>Period</th><th>Amount</th><th>Method</th><th>Reference</th><th>Status</th></tr>'+driverPayouts.map(p=>'<tr>'+'<td style="font-size:12px">'+new Date(p.paid_at||p.created_at).toLocaleDateString()+'</td>'+'<td style="font-size:12px;color:var(--sub)">'+(p.period_start?new Date(p.period_start+'T12:00:00').toLocaleDateString():'—')+' – '+(p.period_end?new Date(p.period_end+'T12:00:00').toLocaleDateString():'—')+'</td>'+'<td style="color:var(--acc);font-weight:700">$'+((p.amount_cents||0)/100).toFixed(2)+'</td>'+'<td style="font-size:12px;color:var(--sub)">"'+(p.payment_method||'—')+'</td>'+'<td style="font-size:12px;font-family:monospace">'+(p.payment_reference||'—')+'</td>'+'<td><span class="badge '+(p.status==='paid'?'badge-green':'badge-yellow')+'">'+p.status+'</span></td>'+'</tr>').join('')+'</table></div></div>' : ''}
-`,'',`<script>
-
-<script>
+`,`<script>
 const D_DRIVER_ID='${driver.id}';
 let dCurPeriod='week';
 async function dSetPeriod(p){
@@ -1462,6 +1476,8 @@ async function dSetPeriod(p){
     document.getElementById('d-st-clicks').textContent=d.clicks??'—';
     document.getElementById('d-st-convs').textContent=d.conversions??'—';
     document.getElementById('d-st-earn').textContent='$'+((d.earnings_cents||0)/100).toFixed(2);
+    document.getElementById('d-truck-period-lbl').textContent='— '+({'day':'Today','week':'This week','month':'This month','year':'This year'}[p]||p);
+    if(d.by_truck){Object.entries(d.by_truck).forEach(function(e){var tid=e[0],td=e[1];var ce=document.getElementById('ts-c-'+tid),ve=document.getElementById('ts-v-'+tid),ee=document.getElementById('ts-e-'+tid);if(ce)ce.textContent=(td.clicks||0)+' clicks';if(ve)ve.textContent=(td.conversions||0)+' convs';if(ee)ee.textContent='$'+((td.earnings_cents||0)/100).toFixed(2);});}
   } catch(e){console.error(e);}
 }
 dSetPeriod('week');
@@ -1557,7 +1573,7 @@ ${trucks.length===0?'<div class="dsec"><p style="color:var(--sub)">No trucks ass
   <input type="text" id="tnm-${n}" value="${t.truck_name||''}" placeholder="e.g. Main Street Truck" style="flex:1;min-width:160px;max-width:280px;padding:6px 10px;font-size:13px;background:#1e1e2e;border:1px solid var(--bdr);color:var(--txt);border-radius:8px">
   <button class="btn btn-sm btn-ghost" onclick="saveTruckName('t${n}','${n}')" style="font-size:12px">Save Name</button>
 </div>
-<div style="text-align:center;margin:20px 0" id="qrimg-${n}">${imgHtml}</div>
+<div style="text-align:center;margin:20px 0" id="qrimg-${n}"><div style="background:white;padding:16px;border-radius:8px;display:inline-block;max-width:220px;border:1px solid #e5e7eb">${imgHtml}</div></div>
 <p style="text-align:center;color:var(--sub);font-size:12px;margin-bottom:16px">${qrUrl}</p>
 <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
 <button class="btn btn-sm" onclick="downloadQR('t${n}','svg')" style="font-size:12px">⬇ SVG</button>
@@ -2068,7 +2084,7 @@ async function handleDriverFleet(request, env, driver) {
   ${trucks.length ? `<table><tr><th>Truck ID</th><th>Name</th><th>Status</th><th>QR Code</th><th style="text-align:right">Action</th></tr>
   ${trucks.map(t=>`<tr>
     <td>${t.id.toUpperCase()}</td>
-    <td style="color:var(--sub)">${t.truck_name||'—'}</td>
+    <td><div style="display:flex;align-items:center;gap:5px"><input type="text" id="tnf-${t.id}" value="${t.truck_name||''}" placeholder="Add name..." maxlength="60" style="background:#1e1e2e;border:1px solid var(--bdr);color:var(--txt);padding:4px 8px;border-radius:6px;font-size:12px;width:110px;font-family:inherit"><button class="btn btn-sm btn-ghost" onclick="saveFleetTruckName('${t.id}')" style="font-size:11px;padding:4px 8px">Save</button></div></td>
     <td><span class="badge ${t.status==='active'?'badge-green':'badge-yellow'}">${t.status}</span></td>
     <td><a href="/driver/qr-codes" style="color:var(--acc);font-size:13px">Download →</a></td>
     <td style="text-align:right">
@@ -2087,6 +2103,11 @@ ${canAdd ? `<div class="dsec">
   <p style="color:var(--sub);font-size:12px;margin-top:12px">Your new truck will be active immediately. QR codes available in <a href="/driver/qr-codes" style="color:var(--acc)">QR Codes</a>.</p>
 </div>` : `<div class="dsec"><p style="color:#f59e0b;font-size:14px">Maximum of ${MAX_TRUCKS} trucks reached. Contact support to increase your limit.</p></div>`}
 `, `<script>
+async function saveFleetTruckName(truckId){
+  var inp=document.getElementById('tnf-'+truckId);
+  if(!inp)return;
+  fetch('/api/truck-name',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({truck_id:truckId,truck_name:inp.value.trim()||null})}).then(function(r){return r.json();}).then(function(d){if(d.ok){inp.style.borderColor='#00ff88';setTimeout(function(){inp.style.borderColor='';},2000);}else{inp.style.borderColor='#ef4444';}}).catch(function(){});
+}
 async function addTruck(){
   const name=document.getElementById('truck-name').value.trim();
   const ok=document.getElementById('fleet-ok');
@@ -2212,9 +2233,11 @@ async function handleAdminDashboard(request, env) {
 
   const GEO_ID = '4b83dcac-2739-4e19-a34e-b3c6a11006e3';
   const SPEEDY_ID = 'c85bb14e-e715-43c6-bb48-46c37a1acfc1';
+  const GEO_DRIVER_ID = GEO_ID;
+  const SPEEDY_DRIVER_ID = SPEEDY_ID;
   const REAL_COMPANY_IDS = [GEO_ID, SPEEDY_ID];
 
-  let drivers=[], commissions=[], affiliates=[], captures=[], w9s=[], trucks=[], conversionRows=[], scans=[];
+  let drivers=[], commissions=[], affiliates=[], captures=[], w9s=[], trucks=[], conversionRows=[], scans=[], payouts=[];
   try {
     [drivers, commissions, affiliates, captures, w9s, trucks, conversionRows, scans] = await Promise.all([
       sbGet(env, 'drivers', 'select=*&order=created_at.desc'),
@@ -2226,7 +2249,6 @@ async function handleAdminDashboard(request, env) {
       sbGet(env, 'conversions', 'select=*&order=created_at.desc&limit=200'),
       sbGet(env, 'scans', 'select=id,truck_id,created_at&order=created_at.desc&limit=5000'),
     ]);
-  let payouts = [];
   try { payouts = await sbGet(env, 'payouts', 'select=*&order=created_at.desc&limit=500'); } catch(e) {}
   } catch(e) { console.error('Admin dashboard fetch error:', e.message); }
 
@@ -2890,12 +2912,19 @@ async function handleApiPeriodStats(request, env) {
       const tf = `truck_id=in.(${truckIds.join(',')})`;
       const [scans, convs] = await Promise.all([
         sbGet(env, 'scans', `${tf}&created_at=gte.${cutoffIso}&select=id`),
-        sbGet(env, 'conversions', `${tf}&created_at=gte.${cutoffIso}&select=commission_amount_cents`),
+        sbGet(env, 'conversions', `${tf}&created_at=gte.${cutoffIso}&select=commission_amount_cents,truck_id`),
       ]);
+      const by_truck={};
+      truckIds.forEach(tid=>{
+        const ts=scans.filter(s=>s.truck_id===tid);
+        const tc=convs.filter(c=>c.truck_id===tid);
+        by_truck[tid]={clicks:ts.length,conversions:tc.length,earnings_cents:tc.reduce((s,c)=>s+(c.commission_amount_cents||0),0)};
+      });
       return jsonOk({
         clicks: scans.length,
         conversions: convs.length,
         earnings_cents: convs.reduce((s,c)=>s+(c.commission_amount_cents||0),0),
+        by_truck,
       });
     }
 
