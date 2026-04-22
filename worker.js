@@ -228,6 +228,8 @@ async function route(request, env, ctx) {
   if (path === '/api/email-capture' && method === 'POST')           return handleCapture(request, env);
   if (path === '/api/contact'    && method === 'POST')              return handleContactPost(request, env);
   if (path === '/api/stats'        && method === 'GET')               return handleApiStats(request, env);
+  if (path === '/api/period-stats' && method === 'GET')               return handleApiPeriodStats(request, env);
+  if (path === '/admin/org-mark-paid' && method === 'POST')           return handleAdminOrgMarkPaid(request, env);
   if (path === '/api/truck-name'   && method === 'POST')              return handleApiTruckName(request, env);
   if (path === '/api/save-qr-code' && method === 'POST')              return handleSaveQrCode(request, env);
   if (path === '/api/sms-webhook'  && method === 'POST')              return handleSmsWebhook(request, env);
@@ -724,16 +726,16 @@ async function handleTruckPage(request, env, ctx, truckId) {
 ${DS}
 /* Landing page specific */
 .hdr{position:sticky;top:0;z-index:100;background:rgba(10,10,15,.9);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-bottom:1px solid var(--bdr);display:flex;align-items:center;justify-content:space-between;padding:0 20px;height:56px}
-.logo{font-size:18px;font-weight:900;letter-spacing:3px;color:var(--acc)}
-.lang-toggle{display:flex;gap:4px;align-items:center}
+.logo{font-size:18px;font-weight:900;letter-spacing:3px;color:var(--acc);white-space:nowrap;flex-shrink:0;min-width:0}
+.lang-toggle{display:flex;gap:4px;align-items:center;flex-shrink:0}
 .lang-btn{background:transparent;border:1px solid var(--bdr);color:var(--sub);padding:5px 11px;border-radius:8px;font-size:13px;font-weight:700;transition:all .15s;cursor:pointer}
 .lang-btn:hover{border-color:var(--acc);color:var(--acc)}
 .lang-btn.active{background:var(--acc);color:#000;border-color:var(--acc)}
 /* Hero */
-.hero{padding:32px 20px 24px;text-align:center;max-width:600px;margin:0 auto}
+.hero{padding:32px 20px 24px;text-align:center;max-width:600px;margin:0 auto;overflow:visible}
 .hero h1{font-size:clamp(28px,7vw,44px);font-weight:900;letter-spacing:-1px;line-height:1.1;margin-bottom:12px}
 .hero h1 .acc{color:var(--acc)}
-.hero-sub{color:var(--sub);font-size:16px;line-height:1.6;margin-bottom:28px;max-width:420px;margin-left:auto;margin-right:auto}
+.hero-sub{color:var(--sub);font-size:16px;line-height:1.6;margin-bottom:28px;max-width:420px;margin-left:auto;margin-right:auto;overflow:visible}
 .hero-form{display:flex;gap:10px;max-width:400px;margin:0 auto;flex-direction:column}
 @media(min-width:480px){.hero-form{flex-direction:row}}
 .hero-form input{flex:1;min-width:0}
@@ -813,7 +815,7 @@ ${DS}
 
 <header class="hdr">
   <a href="/" class="logo" style="text-decoration:none">QR PERKS</a>
-  <div style="display:flex;align-items:center;gap:10px">
+  <div style="display:flex;align-items:center;gap:8px;min-width:0;flex-shrink:1">
     <a href="/driver" class="btn-outline btn btn-sm" style="min-height:36px;padding:0 14px;font-size:13px;text-decoration:none"><span class="en">Driver Login</span><span class="es">Acceso Conductores</span></a>
     <div class="lang-toggle"><button class="lang-btn" id="lang-en" onclick="setLang('en')">EN</button><button class="lang-btn" id="lang-es" onclick="setLang('es')">ES</button></div>
   </div>
@@ -825,7 +827,7 @@ ${DS}
   <div id="hero-capture-wrap">
   <form class="hero-form" onsubmit="heroCapture(event)" style="flex-direction:column;align-items:stretch">
     <div style="display:flex;gap:10px;flex-wrap:wrap">
-      <input type="email" id="hero-email" name="email" required placeholder="Enter your email" style="flex:1;min-width:180px">
+      <input type="email" id="hero-email" name="email" placeholder="Enter your email (optional)" style="flex:1;min-width:180px">
       <input type="tel" id="hero-phone" name="phone" placeholder="Phone number (optional)" autocomplete="tel" style="flex:1;min-width:160px">
     </div>
     <p class="tcpa-disc"><span class="en">By tapping 'Get My Deal', you expressly consent to receive recurring automated marketing text messages and emails from QR Perks at the contact info provided. Consent is not a condition of purchase. Msg frequency varies. Msg &amp; data rates may apply. Reply STOP to opt out, HELP for help. <a href="/leads-terms">Terms</a> | <a href="/privacy">Privacy Policy</a></span><span class="es">Al tocar 'Obtener Mi Oferta', usted consiente expresamente recibir mensajes de texto de marketing automatizados recurrentes y correos electrónicos de QR Perks. El consentimiento no es condición de compra. La frecuencia varía. Tarifas aplican. Responda STOP para cancelar, HELP para ayuda. <a href="/leads-terms">Términos</a> | <a href="/privacy">Política de Privacidad</a></span></p>
@@ -980,8 +982,9 @@ function doRedirect(){if(bridgeUrl){window.location.href=bridgeUrl;}closeBridge(
 function heroCapture(e){
   e.preventDefault();
   const email=document.getElementById('hero-email').value.trim();
-  if(!email) return;
+  if(email&&!email.includes('@')) return;
   const phone=(document.getElementById('hero-phone')?.value||'').trim()||null;
+  if(!email&&!phone) return;
   const lang=getLang();
   fetch('/api/email-capture',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({email,phone,source:TRUCK_ID||'hero',offer_clicked:'signup',lang})}).then(r=>r.json()).then(d=>{
@@ -1382,9 +1385,35 @@ ${stepsHtml}
 <button class="btn btn-sm btn-outline" style="flex:1" onclick="document.getElementById(\'pay-modal\').style.display=\'none\'">Cancel</button>
 </div>
 </div></div>
+<div style="background:var(--surf);border:1px solid var(--bdr);border-radius:16px;padding:20px;margin-bottom:20px">
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:16px">
+    <div style="font-size:14px;font-weight:800">My Stats</div>
+    <div style="display:flex;gap:6px" id="d-period-btns">
+      <button style="background:transparent;border:1px solid var(--bdr);color:var(--sub);padding:5px 12px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;transition:all .15s" onclick="dSetPeriod('day')">Day</button>
+      <button style="background:var(--acc);color:#000;border:1px solid var(--acc);padding:5px 12px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer" onclick="dSetPeriod('week')">Week</button>
+      <button style="background:transparent;border:1px solid var(--bdr);color:var(--sub);padding:5px 12px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;transition:all .15s" onclick="dSetPeriod('month')">Month</button>
+      <button style="background:transparent;border:1px solid var(--bdr);color:var(--sub);padding:5px 12px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;transition:all .15s" onclick="dSetPeriod('year')">Year</button>
+    </div>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
+    <div style="text-align:center;padding:14px;background:var(--bg);border-radius:12px;border:1px solid var(--bdr)">
+      <div style="font-size:24px;font-weight:900" id="d-st-clicks">—</div>
+      <div style="font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:1px;margin-top:4px">Clicks</div>
+    </div>
+    <div style="text-align:center;padding:14px;background:var(--bg);border-radius:12px;border:1px solid var(--bdr)">
+      <div style="font-size:24px;font-weight:900" id="d-st-convs">—</div>
+      <div style="font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:1px;margin-top:4px">Conversions</div>
+    </div>
+    <div style="text-align:center;padding:14px;background:var(--bg);border-radius:12px;border:1px solid var(--bdr)">
+      <div style="font-size:24px;font-weight:900;color:var(--acc)" id="d-st-earn">—</div>
+      <div style="font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:1px;margin-top:4px">Earnings</div>
+    </div>
+  </div>
+  <div style="font-size:11px;color:var(--sub);margin-top:10px" id="d-period-label">This week</div>
+</div>
 <div class="stats">
-  <div class="stat"><div class="stat-n">${driverScans.length}</div><div class="stat-l">Scans</div></div>
-  <div class="stat"><div class="stat-n">${commissions.filter(c=>c.conversion_id).length}</div><div class="stat-l">Conversions</div></div>
+  <div class="stat"><div class="stat-n">${driverScans.length}</div><div class="stat-l">Total Scans</div></div>
+  <div class="stat"><div class="stat-n">${commissions.filter(c=>c.conversion_id).length}</div><div class="stat-l">Total Convs</div></div>
   <div class="stat"><div class="stat-n">${fmt$(pending)}</div><div class="stat-l">Pending</div></div>
   <div class="stat"><div class="stat-n">${fmt$(paid)}</div><div class="stat-l">Paid</div></div>
 </div>
@@ -1409,6 +1438,29 @@ ${recent.length?`<div class="dsec">
     <td><span class="badge ${c.status==='paid'?'badge-green':c.status==='pending'?'badge-yellow':'badge-red'}">${c.status}</span></td>
   </tr>`).join('')}
   </table></div>`:''}`,'',`<script>
+
+<script>
+const D_DRIVER_ID='${driver.id}';
+let dCurPeriod='week';
+async function dSetPeriod(p){
+  dCurPeriod=p;
+  document.querySelectorAll('#d-period-btns button').forEach(b=>{
+    const active=b.textContent.toLowerCase()===p;
+    b.style.background=active?'var(--acc)':'transparent';
+    b.style.color=active?'#000':'var(--sub)';
+    b.style.borderColor=active?'var(--acc)':'var(--bdr)';
+  });
+  const labels={day:'Today',week:'This week',month:'This month',year:'This year'};
+  document.getElementById('d-period-label').textContent=labels[p]||p;
+  try {
+    const d=await fetch('/api/period-stats?period='+p+'&scope=driver&driver_id='+D_DRIVER_ID).then(r=>r.json());
+    document.getElementById('d-st-clicks').textContent=d.clicks??'—';
+    document.getElementById('d-st-convs').textContent=d.conversions??'—';
+    document.getElementById('d-st-earn').textContent='$'+((d.earnings_cents||0)/100).toFixed(2);
+  } catch(e){console.error(e);}
+}
+dSetPeriod('week');
+</script>
 async function savePayment(){
   const type=document.getElementById('pay-type').value;
   const detail=document.getElementById('pay-detail').value.trim();
@@ -2146,27 +2198,98 @@ async function handleAdminLoginPost(request, env) {
 async function handleAdminDashboard(request, env) {
   if (!isAdminAuthed(request, env)) return Response.redirect(new URL('/admin/login', request.url).toString(), 302);
 
-  // Fetch all data defensively
-  let drivers=[], commissions=[], affiliates=[], captures=[], w9s=[], trucks=[], conversionRows=[];
+  const GEO_ID = '4b83dcac-2739-4e19-a34e-b3c6a11006e3';
+  const SPEEDY_ID = 'c85bb14e-e715-43c6-bb48-46c37a1acfc1';
+  const REAL_COMPANY_IDS = [GEO_ID, SPEEDY_ID];
+
+  let drivers=[], commissions=[], affiliates=[], captures=[], w9s=[], trucks=[], conversionRows=[], scans=[];
   try {
-    [drivers, commissions, affiliates, captures, w9s, trucks, conversionRows] = await Promise.all([
+    [drivers, commissions, affiliates, captures, w9s, trucks, conversionRows, scans] = await Promise.all([
       sbGet(env, 'drivers', 'select=*&order=created_at.desc'),
       sbGet(env, 'commissions', 'select=*&order=created_at.desc'),
       sbGet(env, 'affiliates', 'select=*&order=display_order.asc'),
       sbGet(env, 'email_captures', 'select=*&order=created_at.desc&limit=100'),
       sbGet(env, 'w9_submissions', 'select=id,driver_id,created_at,reviewed&order=created_at.desc'),
-      sbGet(env, 'trucks', 'select=id,driver_id,status,truck_name&order=id.asc&limit=20'),
+      sbGet(env, 'trucks', 'select=id,driver_id,status,truck_name&order=id.asc&limit=100'),
       sbGet(env, 'conversions', 'select=*&order=created_at.desc&limit=200'),
+      sbGet(env, 'scans', 'select=id,truck_id,created_at&order=created_at.desc&limit=5000'),
     ]);
   } catch(e) { console.error('Admin dashboard fetch error:', e.message); }
+
+  // Sort trucks numerically
+  trucks.sort((a,b) => parseInt(a.id.replace('t','')) - parseInt(b.id.replace('t','')));
 
   const pending   = drivers.filter(d=>d.status==='pending');
   const active    = drivers.filter(d=>d.status==='active');
   const pendingPay = commissions.filter(c=>c.status==='pending').reduce((s,c)=>s+(c.driver_amount_cents||0),0);
   const paidOut    = commissions.filter(c=>c.status==='paid').reduce((s,c)=>s+(c.driver_amount_cents||0),0);
+  const trucksAssigned = trucks.filter(t=>t.driver_id).length;
 
+  // Real company drivers only (for assignment dropdown)
+  const realDrivers = drivers.filter(d => REAL_COMPANY_IDS.includes(d.id) && d.status==='active');
+
+  // Per-org data
+  const orgData = (driverId, orgName) => {
+    const orgTrucks = trucks.filter(t=>t.driver_id===driverId);
+    const orgTruckIds = orgTrucks.map(t=>t.id);
+    const orgScans = scans.filter(s=>orgTruckIds.includes(s.truck_id));
+    const orgConvs = conversionRows.filter(c=>orgTruckIds.includes(c.truck_id));
+    const orgComms = commissions.filter(c=>c.driver_id===driverId);
+    const earned   = orgConvs.reduce((s,c)=>s+(c.commission_amount_cents||0),0);
+    const paidC    = orgComms.filter(c=>c.status==='paid').reduce((s,c)=>s+(c.driver_amount_cents||0),0);
+    const owedC    = orgComms.filter(c=>c.status==='pending').reduce((s,c)=>s+(c.driver_amount_cents||0),0);
+    return { orgName, driverId, orgTrucks, orgTruckIds, orgScans, orgConvs, orgComms, earned, paidC, owedC };
+  };
+  const geo    = orgData(GEO_ID, 'Geo Transportation');
+  const speedy = orgData(SPEEDY_ID, 'Speedy Dumps Truck Co');
+
+  const orgCard = (o) => {
+    const truckRows = o.orgTrucks.map(t => {
+      const tScans = o.orgScans.filter(s=>s.truck_id===t.id).length;
+      const tConvs = o.orgConvs.filter(c=>c.truck_id===t.id);
+      const tEarned = tConvs.reduce((s,c)=>s+(c.commission_amount_cents||0),0);
+      return `<tr>
+        <td style="font-weight:700">${t.id.toUpperCase()}</td>
+        <td style="color:var(--sub)">${t.truck_name||'—'}</td>
+        <td>${tScans}</td>
+        <td>${tConvs.length}</td>
+        <td style="color:var(--acc)">$${(tEarned/100).toFixed(2)}</td>
+        <td><span class="badge ${t.status==='active'?'badge-green':'badge-yellow'}">${t.status}</span></td>
+      </tr>`;
+    }).join('');
+    return `
+<div class="acard" id="pay-${o.driverId}" style="border:1px solid var(--bdr);border-radius:16px;padding:20px;margin-bottom:16px;background:var(--surf)">
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap">
+    <div>
+      <div style="font-size:16px;font-weight:800;margin-bottom:4px">${o.orgName}</div>
+      <div style="display:flex;gap:20px;flex-wrap:wrap;margin-top:10px">
+        <div style="text-align:center"><div style="font-size:22px;font-weight:800">${o.orgScans.length}</div><div style="font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:1px">Total Clicks</div></div>
+        <div style="text-align:center"><div style="font-size:22px;font-weight:800">${o.orgConvs.length}</div><div style="font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:1px">Conversions</div></div>
+        <div style="text-align:center"><div style="font-size:22px;font-weight:800;color:var(--acc)">$${(o.earned/100).toFixed(2)}</div><div style="font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:1px">Total Earned</div></div>
+        <div style="text-align:center"><div style="font-size:22px;font-weight:800">$${(o.paidC/100).toFixed(2)}</div><div style="font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:1px">Paid Out</div></div>
+        <div style="text-align:center"><div style="font-size:22px;font-weight:800;color:#f59e0b">$${(o.owedC/100).toFixed(2)}</div><div style="font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:1px">Owed</div></div>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap">
+      ${o.owedC>0?`<form action="/admin/org-mark-paid" method="POST" style="display:inline"><input type="hidden" name="driver_id" value="${o.driverId}"><button class="btn btn-sm" style="font-size:12px">Mark All Paid ($${(o.owedC/100).toFixed(2)})</button></form>`:''}
+      <button class="btn btn-sm btn-ghost" onclick="toggleDetail('detail-${o.driverId}')" style="font-size:12px">View Details ▾</button>
+    </div>
+  </div>
+  <div id="detail-${o.driverId}" style="display:none;margin-top:16px;border-top:1px solid var(--bdr);padding-top:16px">
+    <div style="font-size:12px;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Per-Truck Breakdown</div>
+    <table style="margin-bottom:16px"><tr><th>Truck</th><th>Name</th><th>Scans</th><th>Convs</th><th>Earnings</th><th>Status</th></tr>
+    ${truckRows||'<tr><td colspan="6" style="color:var(--sub)">No trucks</td></tr>'}
+    </table>
+  </div>
+</div>`;
+  };
+
+  const w9Pending = w9s.filter(w=>!w.reviewed).length;
+  const commPending = commissions.filter(c=>c.status==='pending').slice(0,40);
+
+  // Driver rows
   const drRow = d => `<tr>
-<td>${d.name||'—'}</td>
+<td>${d.company_name||d.name||'—'}</td>
 <td style="color:var(--sub)">${d.email}</td>
 <td><span class="badge ${d.status==='active'?'badge-green':d.status==='pending'?'badge-yellow':'badge-red'}">${d.status}</span></td>
 <td>${d.w9_submitted?'<span style="color:var(--acc)">✓</span>':'<span style="color:#333">—</span>'}</td>
@@ -2177,12 +2300,30 @@ ${d.status==='pending'?`<form action="/admin/approve-driver" method="POST" style
 ${d.status==='active'?`<form action="/admin/deny-driver" method="POST" style="display:inline"><input type="hidden" name="driver_id" value="${d.id}"><button class="btn btn-sm btn-ghost" style="font-size:11px">Suspend</button></form>`:''}
 </td></tr>`;
 
-  const commPending = commissions.filter(c=>c.status==='pending').slice(0,40);
-  const trucksAssigned = trucks.filter(t=>t.driver_id).length;
+  const totalRev = conversionRows.reduce((s,c)=>s+(c.gross_amount_cents||0),0);
+  const pendingConvComm = conversionRows.filter(c=>c.status==='pending').reduce((s,c)=>s+(c.commission_amount_cents||0),0);
+  const paidConvComm = conversionRows.filter(c=>c.status==='paid').reduce((s,c)=>s+(c.commission_amount_cents||0),0);
+  const byOffer = conversionRows.reduce((m,c)=>{const k=c.offer_name||'unknown';m[k]=(m[k]||0)+1;return m;},{});
 
   return adminShell('Dashboard', `
+<style>
+.acoll{border:1px solid var(--bdr);border-radius:12px;margin-bottom:12px;overflow:hidden}
+.acoll summary{padding:14px 18px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;font-size:14px;font-weight:700;user-select:none;list-style:none;background:var(--surf)}
+.acoll summary::-webkit-details-marker{display:none}
+.acoll summary::after{content:'▾';color:var(--sub);font-size:12px;transition:transform .2s}
+details[open] .acoll summary::after{transform:rotate(180deg)}
+.acoll-body{padding:16px 18px;border-top:1px solid var(--bdr)}
+.pstat-btn{background:transparent;border:1px solid var(--bdr);color:var(--sub);padding:6px 14px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;transition:all .15s}
+.pstat-btn.active{background:var(--acc);color:#000;border-color:var(--acc)}
+.pstat-box{text-align:center;padding:16px;background:var(--surf);border:1px solid var(--bdr);border-radius:12px}
+.pstat-n{font-size:26px;font-weight:900;margin-bottom:4px}
+.pstat-l{font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:1px}
+</style>
+
 <h1>QR Perks Admin</h1>
-<div class="stats-row">
+
+<!-- SUMMARY STRIP -->
+<div class="stats-row" style="margin-bottom:20px">
   <div class="astat"><div class="astat-n">${drivers.length}</div><div class="astat-l">Drivers</div></div>
   <div class="astat"><div class="astat-n" style="color:#f59e0b">${pending.length}</div><div class="astat-l">Pending</div></div>
   <div class="astat"><div class="astat-n">${active.length}</div><div class="astat-l">Active</div></div>
@@ -2192,34 +2333,104 @@ ${d.status==='active'?`<form action="/admin/deny-driver" method="POST" style="di
   <div class="astat"><div class="astat-n">${trucksAssigned}</div><div class="astat-l">Trucks Live</div></div>
 </div>
 
-<div class="asec" id="drivers">
-<h2>Drivers</h2>
-<table><tr><th>Name</th><th>Email</th><th>Status</th><th>W9</th><th>Ref Code</th><th style="text-align:right">Actions</th></tr>
-${drivers.map(drRow).join('')||'<tr><td colspan="6" style="color:var(--sub);padding:12px 0">No drivers yet</td></tr>'}
-</table></div>
+<!-- PERIOD STATS DASHBOARD -->
+<div class="acoll" style="margin-bottom:20px">
+  <div style="padding:14px 18px;background:var(--surf);border-radius:12px 12px 0 0">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+      <div style="font-size:14px;font-weight:800">Performance Dashboard</div>
+      <div style="display:flex;gap:6px" id="period-btns">
+        <button class="pstat-btn" onclick="setPeriod('day')">Day</button>
+        <button class="pstat-btn active" onclick="setPeriod('week')">Week</button>
+        <button class="pstat-btn" onclick="setPeriod('month')">Month</button>
+        <button class="pstat-btn" onclick="setPeriod('year')">Year</button>
+      </div>
+    </div>
+  </div>
+  <div style="padding:16px 18px;border-top:1px solid var(--bdr);background:var(--bg)">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px" id="admin-stats-grid">
+      <div class="pstat-box">
+        <div class="pstat-n" id="as-geo-clicks">—</div>
+        <div class="pstat-l">Geo — Clicks</div>
+      </div>
+      <div class="pstat-box">
+        <div class="pstat-n" id="as-speedy-clicks">—</div>
+        <div class="pstat-l">Speedy — Clicks</div>
+      </div>
+      <div class="pstat-box">
+        <div class="pstat-n" id="as-geo-convs">—</div>
+        <div class="pstat-l">Geo — Conversions</div>
+      </div>
+      <div class="pstat-box">
+        <div class="pstat-n" id="as-speedy-convs">—</div>
+        <div class="pstat-l">Speedy — Conversions</div>
+      </div>
+      <div class="pstat-box">
+        <div class="pstat-n" id="as-geo-earn">—</div>
+        <div class="pstat-l">Geo — Earnings</div>
+      </div>
+      <div class="pstat-box">
+        <div class="pstat-n" id="as-speedy-earn">—</div>
+        <div class="pstat-l">Speedy — Earnings</div>
+      </div>
+    </div>
+    <div style="font-size:11px;color:var(--sub)" id="as-period-label">This week</div>
+  </div>
+</div>
 
-<div class="asec" id="trucks">
-<h2>Truck Assignments</h2>
+<!-- PAYMENTS -->
+<details open id="payments">
+<div class="acoll">
+<summary>Payments — <span style="color:#f59e0b">$${((geo.owedC+speedy.owedC)/100).toFixed(2)} owed</span></summary>
+<div class="acoll-body">
+${orgCard(geo)}
+${orgCard(speedy)}
+</div>
+</div>
+</details>
+
+<!-- TRUCK ASSIGNMENTS -->
+<details open id="trucks">
+<div class="acoll">
+<summary>Truck Assignments — ${trucksAssigned} active</summary>
+<div class="acoll-body">
 <table><tr><th>Truck</th><th>Name</th><th>Assigned Driver</th><th>Status</th><th style="text-align:right">Action</th></tr>
 ${trucks.map(t=>{const drv=drivers.find(d=>d.id===t.driver_id);return`<tr>
-<td>${t.id.toUpperCase()}</td>
+<td style="font-weight:700">${t.id.toUpperCase()}</td>
 <td style="color:var(--sub);font-size:13px">${t.truck_name||'—'}</td>
-<td>${drv?drv.name+' ('+drv.email+')':`<span style="color:var(--sub)">Unassigned</span>`}</td>
+<td>${drv?`<span style="font-weight:600">${drv.company_name||drv.name}</span>`:`<span style="color:var(--sub)">Unassigned</span>`}</td>
 <td><span class="badge ${t.status==='active'?'badge-green':'badge-yellow'}">${t.status}</span></td>
 <td style="text-align:right">
 <form action="/admin/assign-truck" method="POST" style="display:inline;display:flex;gap:6px;justify-content:flex-end;align-items:center">
 <input type="hidden" name="truck_id" value="${t.id}">
-<select name="driver_id" style="background:#1e1e2e;border:1px solid var(--bdr);color:var(--txt);padding:4px 8px;border-radius:6px;font-size:12px;max-width:160px">
+<select name="driver_id" style="background:#1e1e2e;border:1px solid var(--bdr);color:var(--txt);padding:4px 8px;border-radius:6px;font-size:12px;max-width:200px">
 <option value="">— Unassign —</option>
-${drivers.filter(d=>d.status==='active').map(d=>`<option value="${d.id}" ${t.driver_id===d.id?'selected':''}>${d.name}</option>`).join('')}
+${realDrivers.map(d=>`<option value="${d.id}" ${t.driver_id===d.id?'selected':''}>${d.company_name||d.name}</option>`).join('')}
 </select>
 <button class="btn btn-sm btn-ghost" style="font-size:11px">Assign</button>
 </form>
 </td></tr>`;}).join('')||'<tr><td colspan="5" style="color:var(--sub);padding:12px 0">No trucks</td></tr>'}
-</table></div>
+</table>
+</div>
+</div>
+</details>
 
-<div class="asec" id="w9">
-<h2>W9 Submissions</h2>
+<!-- DRIVERS -->
+<details id="drivers">
+<div class="acoll">
+<summary>Drivers — <span style="color:var(--acc)">${active.length} active</span>${pending.length>0?` · <span style="color:#f59e0b">${pending.length} pending</span>`:''}</summary>
+<div class="acoll-body">
+<table><tr><th>Company</th><th>Email</th><th>Status</th><th>W9</th><th>Ref Code</th><th style="text-align:right">Actions</th></tr>
+${drivers.map(drRow).join('')||'<tr><td colspan="6" style="color:var(--sub);padding:12px 0">No drivers yet</td></tr>'}
+</table>
+</div>
+</div>
+</details>
+
+<!-- W9 SUBMISSIONS -->
+<details id="w9">
+<div class="acoll">
+<summary>W9 Submissions — ${w9Pending>0?`<span style="color:#f59e0b">${w9Pending} pending</span>`:`${w9s.length} submitted`}</summary>
+<div class="acoll-body">
 <table><tr><th>Date</th><th>Driver ID</th><th>Status</th><th style="text-align:right">Action</th></tr>
 ${w9s.map(w=>`<tr>
 <td>${new Date(w.created_at).toLocaleDateString()}</td>
@@ -2227,10 +2438,16 @@ ${w9s.map(w=>`<tr>
 <td>${w.reviewed?'<span class="badge badge-green">Reviewed</span>':'<span class="badge badge-yellow">Pending</span>'}</td>
 <td style="text-align:right">${!w.reviewed?`<form action="/admin/w9/review" method="POST" style="display:inline"><input type="hidden" name="w9_id" value="${w.id}"><button class="btn btn-sm btn-ghost" style="font-size:11px">Mark Reviewed</button></form>`:'—'}</td>
 </tr>`).join('')||'<tr><td colspan="4" style="color:var(--sub);padding:12px 0">No W9 submissions</td></tr>'}
-</table></div>
+</table>
+</div>
+</div>
+</details>
 
-<div class="asec" id="commissions">
-<h2>Pending Commissions</h2>
+<!-- COMMISSIONS -->
+<details id="commissions">
+<div class="acoll">
+<summary>Pending Commissions — $${(pendingPay/100).toFixed(2)} owed</summary>
+<div class="acoll-body">
 <div style="margin-bottom:12px">
 <form action="/admin/commissions/calculate" method="POST" style="display:inline">
 <button class="btn btn-sm">▶ Run Commission Calc</button>
@@ -2244,10 +2461,16 @@ ${commPending.map(c=>`<tr>
 <td>$${((c.driver_amount_cents||0)/100).toFixed(2)}</td>
 <td style="text-align:right"><form action="/admin/commissions/mark-paid" method="POST" style="display:inline"><input type="hidden" name="commission_id" value="${c.id}"><button class="btn btn-sm btn-outline" style="font-size:11px">Mark Paid</button></form></td>
 </tr>`).join('')||'<tr><td colspan="5" style="color:var(--sub);padding:12px 0">No pending commissions</td></tr>'}
-</table></div>
+</table>
+</div>
+</div>
+</details>
 
-<div class="asec" id="offers">
-<h2>Affiliate Offers</h2>
+<!-- AFFILIATE OFFERS -->
+<details id="offers">
+<div class="acoll">
+<summary>Affiliate Offers — ${affiliates.filter(a=>a.status==='active').length} active</summary>
+<div class="acoll-body">
 <table><tr><th>Name</th><th>Type</th><th>Order</th><th>Featured</th><th>Status</th><th style="text-align:right">Actions</th></tr>
 ${affiliates.map(a=>`<tr>
 <td>${a.name}</td>
@@ -2259,19 +2482,25 @@ ${affiliates.map(a=>`<tr>
 <form action="/admin/offers" method="POST" style="display:inline"><input type="hidden" name="affiliate_id" value="${a.id}"><input type="hidden" name="action" value="${a.status==='active'?'deactivate':'activate'}"><button class="btn btn-sm btn-ghost" style="font-size:11px">${a.status==='active'?'Deactivate':'Activate'}</button></form>
 <form action="/admin/offers" method="POST" style="display:inline;margin-left:4px"><input type="hidden" name="affiliate_id" value="${a.id}"><input type="hidden" name="action" value="${a.is_featured?'unfeature':'feature'}"><button class="btn btn-sm ${a.is_featured?'btn-ghost':''}" style="font-size:11px">${a.is_featured?'Unfeature':'Feature'}</button></form>
 </td></tr>`).join('')}
-</table></div>
+</table>
+</div>
+</div>
+</details>
 
-<div class="asec" id="leads">
-<h2>Email Captures</h2>
+<!-- EMAIL CAPTURES / LEADS -->
+<details id="leads">
+<div class="acoll">
+<summary>Email Captures — ${captures.filter(c=>c.status!=='unsubscribed').length} active · ${captures.length} total</summary>
+<div class="acoll-body">
 ${(()=>{
-  const active  = captures.filter(c=>c.status!=='unsubscribed');
-  const unsub   = captures.filter(c=>c.status==='unsubscribed');
-  const en      = captures.filter(c=>c.lang==='en'||!c.lang);
-  const es      = captures.filter(c=>c.lang==='es');
-  const withPh  = captures.filter(c=>c.phone);
+  const actv = captures.filter(c=>c.status!=='unsubscribed');
+  const unsub = captures.filter(c=>c.status==='unsubscribed');
+  const en = captures.filter(c=>c.lang==='en'||!c.lang);
+  const es = captures.filter(c=>c.lang==='es');
+  const withPh = captures.filter(c=>c.phone);
   return `<div class="stats-row" style="margin-bottom:12px">
   <div class="astat"><div class="astat-n">${captures.length}</div><div class="astat-l">Total</div></div>
-  <div class="astat"><div class="astat-n" style="color:var(--acc)">${active.length}</div><div class="astat-l">Active</div></div>
+  <div class="astat"><div class="astat-n" style="color:var(--acc)">${actv.length}</div><div class="astat-l">Active</div></div>
   <div class="astat"><div class="astat-n" style="color:#f59e0b">${unsub.length}</div><div class="astat-l">Unsubscribed</div></div>
   <div class="astat"><div class="astat-n">${withPh.length}</div><div class="astat-l">With Phone</div></div>
   <div class="astat"><div class="astat-n">${en.length}</div><div class="astat-l">EN</div></div>
@@ -2293,36 +2522,64 @@ ${captures.slice(0,100).map(c=>`<tr>
 <td style="color:var(--sub);font-size:12px">${c.source||'—'}</td>
 <td><span class="badge ${c.status==='unsubscribed'?'badge-red':'badge-green'}">${c.status||'active'}</span></td>
 </tr>`).join('')||'<tr><td colspan="6" style="color:var(--sub);padding:12px 0">No leads yet</td></tr>'}
-</table></div>
+</table>
+</div>
+</div>
+</details>
 
-<div class="asec" id="conversions">
-<h2>MaxBounty Conversions</h2>
-${(()=>{
-  const totalRev = conversionRows.reduce((s,c)=>s+(c.gross_amount_cents||0),0);
-  const pendingComm = conversionRows.filter(c=>c.status==='pending').reduce((s,c)=>s+(c.commission_amount_cents||0),0);
-  const paidComm = conversionRows.filter(c=>c.status==='paid').reduce((s,c)=>s+(c.commission_amount_cents||0),0);
-  const byOffer = conversionRows.reduce((m,c)=>{const k=c.offer_name||'unknown';m[k]=(m[k]||0)+1;return m;},{});
-  return `<div class="stats-row" style="margin-bottom:16px">
+<!-- CONVERSIONS -->
+<details id="conversions">
+<div class="acoll">
+<summary>MaxBounty Conversions — ${conversionRows.length} total · $${(totalRev/100).toFixed(2)} revenue</summary>
+<div class="acoll-body">
+<div class="stats-row" style="margin-bottom:16px">
   <div class="astat"><div class="astat-n">${conversionRows.length}</div><div class="astat-l">Total</div></div>
   <div class="astat"><div class="astat-n" style="color:var(--acc)">$${(totalRev/100).toFixed(2)}</div><div class="astat-l">Revenue</div></div>
-  <div class="astat"><div class="astat-n" style="color:#f59e0b">$${(pendingComm/100).toFixed(2)}</div><div class="astat-l">Commissions Owed</div></div>
-  <div class="astat"><div class="astat-n">$${(paidComm/100).toFixed(2)}</div><div class="astat-l">Commissions Paid</div></div>
+  <div class="astat"><div class="astat-n" style="color:#f59e0b">$${(pendingConvComm/100).toFixed(2)}</div><div class="astat-l">Comm. Owed</div></div>
+  <div class="astat"><div class="astat-n">$${(paidConvComm/100).toFixed(2)}</div><div class="astat-l">Comm. Paid</div></div>
 </div>
-${Object.entries(byOffer).map(([k,v])=>`<span style="display:inline-block;background:#1e1e2e;padding:3px 10px;border-radius:4px;font-size:12px;color:var(--sub);margin:2px 4px 2px 0">${k}: <strong style="color:var(--txt)">${v}</strong></span>`).join('')}`;
-})()}
+${Object.entries(byOffer).map(([k,v])=>`<span style="display:inline-block;background:#1e1e2e;padding:3px 10px;border-radius:4px;font-size:12px;color:var(--sub);margin:2px 4px 2px 0">${k}: <strong style="color:var(--txt)">${v}</strong></span>`).join('')}
 <table style="margin-top:14px"><tr><th>Date</th><th>Truck</th><th>Driver</th><th>Offer</th><th>Payout</th><th>Commission</th><th>Status</th><th style="text-align:right">Action</th></tr>
 ${conversionRows.map(c=>{const drv=drivers.find(d=>d.id===c.driver_id);return`<tr>
 <td style="font-size:12px;color:var(--sub)">${new Date(c.created_at).toLocaleDateString()}</td>
 <td>${(c.truck_id||'—').toUpperCase()}</td>
-<td style="color:var(--sub);font-size:13px">${drv?drv.name:'—'}</td>
+<td style="color:var(--sub);font-size:13px">${drv?drv.company_name||drv.name:'—'}</td>
 <td style="color:var(--sub);font-size:12px">${c.offer_name||c.affiliate_id||'—'}</td>
 <td style="color:var(--acc)">$${((c.gross_amount_cents||0)/100).toFixed(2)}</td>
 <td style="color:#f59e0b">$${((c.commission_amount_cents||0)/100).toFixed(2)}</td>
 <td><span class="badge ${c.status==='paid'?'badge-green':c.status==='pending'?'badge-yellow':'badge-red'}">${c.status}</span></td>
 <td style="text-align:right">${c.status==='pending'?`<form action="/admin/conversions/mark-paid" method="POST" style="display:inline"><input type="hidden" name="conversion_id" value="${c.id}"><button class="btn btn-sm btn-outline" style="font-size:11px">Mark Paid</button></form>`:'—'}</td>
 </tr>`;}).join('')||'<tr><td colspan="8" style="color:var(--sub);padding:12px 0">No conversions yet</td></tr>'}
-</table></div>`);
+</table>
+</div>
+</div>
+</details>
+
+<script>
+function toggleDetail(id){const el=document.getElementById(id);if(el)el.style.display=el.style.display==='none'?'block':'none';}
+
+let curPeriod='week';
+async function setPeriod(p){
+  curPeriod=p;
+  document.querySelectorAll('.pstat-btn').forEach(b=>b.classList.toggle('active',b.textContent.toLowerCase()===p));
+  const labels={day:'Today',week:'This week',month:'This month',year:'This year'};
+  document.getElementById('as-period-label').textContent=labels[p]||p;
+  try {
+    const d=await fetch('/api/period-stats?period='+p+'&scope=admin').then(r=>r.json());
+    document.getElementById('as-geo-clicks').textContent=d.geo?.clicks??'—';
+    document.getElementById('as-speedy-clicks').textContent=d.speedy?.clicks??'—';
+    document.getElementById('as-geo-convs').textContent=d.geo?.conversions??'—';
+    document.getElementById('as-speedy-convs').textContent=d.speedy?.conversions??'—';
+    document.getElementById('as-geo-earn').textContent='$'+((d.geo?.earnings_cents||0)/100).toFixed(2);
+    document.getElementById('as-speedy-earn').textContent='$'+((d.speedy?.earnings_cents||0)/100).toFixed(2);
+  } catch(e){console.error(e);}
 }
+// Load week stats on mount
+setPeriod('week');
+</script>
+`);
+}
+
 
 async function handleAdminApproveDriver(request, env) {
   if (!isAdminAuthed(request, env)) return Response.redirect(new URL('/admin/login', request.url).toString(), 302);
@@ -2486,6 +2743,86 @@ function csvEsc(val) {
     return '"' + s.replace(/"/g, '""') + '"';
   }
   return s;
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+// PERIOD STATS — /api/period-stats?period=day|week|month|year&scope=admin|driver&driver_id=...
+// ═══════════════════════════════════════════════════════════════
+async function handleApiPeriodStats(request, env) {
+  try {
+    const url = new URL(request.url);
+    const period = url.searchParams.get('period') || 'week';
+    const scope = url.searchParams.get('scope') || 'admin';
+    const driverId = url.searchParams.get('driver_id') || null;
+
+    const now = new Date();
+    let cutoff;
+    if (period === 'day')   cutoff = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    else if (period === 'month') cutoff = new Date(now.getFullYear(), now.getMonth(), 1);
+    else if (period === 'year')  cutoff = new Date(now.getFullYear(), 0, 1);
+    else cutoff = new Date(now.getTime() - 7*86400000); // week default
+    const cutoffIso = cutoff.toISOString();
+
+    if (scope === 'driver' && driverId) {
+      const trucks = await sbGet(env, 'trucks', `driver_id=eq.${driverId}&select=id`);
+      const truckIds = trucks.map(t => t.id);
+      if (truckIds.length === 0) return jsonOk({ clicks:0, conversions:0, earnings_cents:0 });
+      const tf = `truck_id=in.(${truckIds.join(',')})`;
+      const [scans, convs] = await Promise.all([
+        sbGet(env, 'scans', `${tf}&created_at=gte.${cutoffIso}&select=id`),
+        sbGet(env, 'conversions', `${tf}&created_at=gte.${cutoffIso}&select=commission_amount_cents`),
+      ]);
+      return jsonOk({
+        clicks: scans.length,
+        conversions: convs.length,
+        earnings_cents: convs.reduce((s,c)=>s+(c.commission_amount_cents||0),0),
+      });
+    }
+
+    // Admin scope — return per-org breakdown
+    const GEO_ID = '4b83dcac-2739-4e19-a34e-b3c6a11006e3';
+    const SPEEDY_ID = 'c85bb14e-e715-43c6-bb48-46c37a1acfc1';
+    const [geoTrucks, speedyTrucks] = await Promise.all([
+      sbGet(env, 'trucks', `driver_id=eq.${GEO_ID}&select=id`),
+      sbGet(env, 'trucks', `driver_id=eq.${SPEEDY_ID}&select=id`),
+    ]);
+    const geoIds = geoTrucks.map(t=>t.id);
+    const speedyIds = speedyTrucks.map(t=>t.id);
+    const allIds = [...geoIds, ...speedyIds];
+    if (allIds.length === 0) return jsonOk({
+      geo:{clicks:0,conversions:0,earnings_cents:0},
+      speedy:{clicks:0,conversions:0,earnings_cents:0},
+    });
+    const [scans, convs] = await Promise.all([
+      sbGet(env, 'scans', `truck_id=in.(${allIds.join(',')})&created_at=gte.${cutoffIso}&select=id,truck_id`),
+      sbGet(env, 'conversions', `truck_id=in.(${allIds.join(',')})&created_at=gte.${cutoffIso}&select=commission_amount_cents,truck_id`),
+    ]);
+    const orgStats = (ids) => ({
+      clicks: scans.filter(s=>ids.includes(s.truck_id)).length,
+      conversions: convs.filter(c=>ids.includes(c.truck_id)).length,
+      earnings_cents: convs.filter(c=>ids.includes(c.truck_id)).reduce((s,c)=>s+(c.commission_amount_cents||0),0),
+    });
+    return jsonOk({ geo: orgStats(geoIds), speedy: orgStats(speedyIds) });
+  } catch(e) {
+    return jsonOk({ error: e.message }, 500);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ORG MARK PAID — /admin/org-mark-paid
+// ═══════════════════════════════════════════════════════════════
+async function handleAdminOrgMarkPaid(request, env) {
+  if (!isAdminAuthed(request, env)) return Response.redirect(new URL('/admin/login', request.url).toString(), 302);
+  const form = await request.formData();
+  const driver_id = form.get('driver_id');
+  if (!driver_id) return Response.redirect(new URL('/admin/dashboard', request.url).toString(), 302);
+  // Mark all pending commissions for this driver as paid
+  const pending = await sbGet(env, 'commissions', `driver_id=eq.${driver_id}&status=eq.pending&select=id`);
+  for (const c of pending) {
+    await sbPatch(env, 'commissions', `id=eq.${c.id}`, { status:'paid', paid_at:new Date().toISOString() });
+  }
+  return Response.redirect(new URL('/admin/dashboard#payments', request.url).toString(), 302);
 }
 
 async function handleApiStats(request, env) {
