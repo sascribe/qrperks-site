@@ -30,7 +30,7 @@ const FALLBACK_AFFILIATES = [
 const T = {
   en: {
     hero_h1: 'Scan. Save. Score.',
-    hero_sub: 'You\'re in. Sign up to get exclusive deals sent directly to your phone — even when you\'re not near a truck.',
+    hero_sub: 'Exclusive deals delivered straight to your phone — just scan the QR code on the truck.',
     email_ph: 'Enter your email',
     cta_main: 'Get My Deal',
     featured_badge: 'FEATURED DEAL',
@@ -55,7 +55,7 @@ const T = {
   },
   es: {
     hero_h1: 'Escanea. Ahorra. Gana.',
-    hero_sub: 'Ya estás adentro. Regístrate para recibir ofertas exclusivas directamente en tu teléfono — aunque no estés cerca del camión.',
+    hero_sub: 'Ofertas exclusivas directo a tu teléfono — solo escanea el código QR del camión.',
     email_ph: 'Ingresa tu correo',
     cta_main: 'Obtener Mi Oferta',
     featured_badge: 'OFERTA DESTACADA',
@@ -230,6 +230,7 @@ async function route(request, env, ctx) {
   if (path === '/api/stats'        && method === 'GET')               return handleApiStats(request, env);
   if (path === '/api/period-stats' && method === 'GET')               return handleApiPeriodStats(request, env);
   if (path === '/admin/org-mark-paid' && method === 'POST')           return handleAdminOrgMarkPaid(request, env);
+  if (path === '/admin/pay-driver'    && method === 'POST')           return handleAdminPayDriver(request, env);
   if (path === '/api/truck-name'   && method === 'POST')              return handleApiTruckName(request, env);
   if (path === '/api/save-qr-code' && method === 'POST')              return handleSaveQrCode(request, env);
   if (path === '/api/sms-webhook'  && method === 'POST')              return handleSmsWebhook(request, env);
@@ -823,7 +824,7 @@ ${DS}
 
 <section class="hero">
   <h1><span class="en">Scan. <span class="acc">Save.</span> Score.</span><span class="es">Escanea. <span class="acc">Ahorra.</span> Gana.</span></h1>
-  <p class="hero-sub"><span class="en">You're in. Sign up to get exclusive deals sent directly to your phone — even when you're not near a truck.</span><span class="es">Ya estás adentro. Regístrate para recibir ofertas exclusivas directamente en tu teléfono — aunque no estés cerca del camión.</span></p>
+  <p class="hero-sub"><span class="en">Exclusive deals delivered straight to your phone — just scan the QR code on the truck.</span><span class="es">Ofertas exclusivas directo a tu teléfono — solo escanea el código QR del camión.</span></p>
   <div id="hero-capture-wrap">
   <form class="hero-form" onsubmit="heroCapture(event)" style="flex-direction:column;align-items:stretch">
     <div style="display:flex;gap:10px;flex-wrap:wrap">
@@ -1325,6 +1326,8 @@ async function handleDriverDashboard(request, env, driver) {
   ]);
   const truckIds = trucks.map(t=>t.id);
   const driverScans = truckIds.length ? await sbGet(env, 'scans', `truck_id=in.(${truckIds.join(',')})&select=id&limit=5000`) : [];
+  let driverPayouts = [];
+  try { driverPayouts = await sbGet(env, 'payouts', `driver_id=eq.${driver.id}&select=*&order=paid_at.desc.nullslast,created_at.desc&limit=100`); } catch(e) {}
   const pending = commissions.filter(c=>c.status==='pending').reduce((s,c)=>s+c.driver_amount_cents,0);
   const paid    = commissions.filter(c=>c.status==='paid').reduce((s,c)=>s+c.driver_amount_cents,0);
   const recent  = commissions.slice(0,8);
@@ -1437,7 +1440,9 @@ ${recent.length?`<div class="dsec">
     <td>${fmt$(c.driver_amount_cents)}</td>
     <td><span class="badge ${c.status==='paid'?'badge-green':c.status==='pending'?'badge-yellow':'badge-red'}">${c.status}</span></td>
   </tr>`).join('')}
-  </table></div>`:''}`,'',`<script>
+  </table></div>`:''}
+${driverPayouts.length ? '<div class="dsec"><h2>Payment History</h2>'+'<p style="font-size:13px;color:var(--sub);margin-bottom:12px">'+driverPayouts.length+' payout'+(driverPayouts.length!==1?'s':'')+' recorded</p>'+'<div style="overflow-x:auto"><table style="min-width:500px">'+'<tr><th>Date Paid</th><th>Period</th><th>Amount</th><th>Method</th><th>Reference</th><th>Status</th></tr>'+driverPayouts.map(p=>'<tr>'+'<td style="font-size:12px">'+new Date(p.paid_at||p.created_at).toLocaleDateString()+'</td>'+'<td style="font-size:12px;color:var(--sub)">'+(p.period_start?new Date(p.period_start+'T12:00:00').toLocaleDateString():'—')+' – '+(p.period_end?new Date(p.period_end+'T12:00:00').toLocaleDateString():'—')+'</td>'+'<td style="color:var(--acc);font-weight:700">$'+((p.amount_cents||0)/100).toFixed(2)+'</td>'+'<td style="font-size:12px;color:var(--sub)">"'+(p.payment_method||'—')+'</td>'+'<td style="font-size:12px;font-family:monospace">'+(p.payment_reference||'—')+'</td>'+'<td><span class="badge '+(p.status==='paid'?'badge-green':'badge-yellow')+'">'+p.status+'</span></td>'+'</tr>').join('')+'</table></div></div>' : ''}
+`,'',`<script>
 
 <script>
 const D_DRIVER_ID='${driver.id}';
@@ -1977,7 +1982,14 @@ async function handleDriverSetPayment(request, env, driver) {
     const body = await request.json();
     const { payment_method, payment_detail } = body;
     if (!payment_method || !payment_detail) return jsonOk({ ok:false, error:'Payment method and detail required' });
-    await sbPatch(env, 'drivers', `id=eq.${driver.id}`, { payment_method_type:payment_method, payment_method_detail_encrypted:payment_detail });
+    const payFields = {
+      payment_method_type: payment_method,
+      payment_method_detail_encrypted: payment_detail,
+      payment_method_set_at: new Date().toISOString(),
+    };
+    if (payment_method === 'paypal') payFields.payment_details_paypal = payment_detail;
+    if (payment_method === 'bank_transfer') payFields.payment_details_bank_name = payment_detail;
+    await sbPatch(env, 'drivers', `id=eq.${driver.id}`, payFields);
     return jsonOk({ ok:true });
   } catch(e) { return jsonOk({ ok:false, error:'Server error' }); }
 }
@@ -2214,6 +2226,8 @@ async function handleAdminDashboard(request, env) {
       sbGet(env, 'conversions', 'select=*&order=created_at.desc&limit=200'),
       sbGet(env, 'scans', 'select=id,truck_id,created_at&order=created_at.desc&limit=5000'),
     ]);
+  let payouts = [];
+  try { payouts = await sbGet(env, 'payouts', 'select=*&order=created_at.desc&limit=500'); } catch(e) {}
   } catch(e) { console.error('Admin dashboard fetch error:', e.message); }
 
   // Sort trucks numerically
@@ -2238,7 +2252,9 @@ async function handleAdminDashboard(request, env) {
     const earned   = orgConvs.reduce((s,c)=>s+(c.commission_amount_cents||0),0);
     const paidC    = orgComms.filter(c=>c.status==='paid').reduce((s,c)=>s+(c.driver_amount_cents||0),0);
     const owedC    = orgComms.filter(c=>c.status==='pending').reduce((s,c)=>s+(c.driver_amount_cents||0),0);
-    return { orgName, driverId, orgTrucks, orgTruckIds, orgScans, orgConvs, orgComms, earned, paidC, owedC };
+    const drv = drivers.find(d=>d.id===driverId);
+    const payMethod = drv ? (drv.payment_details_paypal||drv.payment_method_detail_encrypted||drv.payment_method_type||'Not set') : 'Not set';
+    return { orgName, driverId, orgTrucks, orgTruckIds, orgScans, orgConvs, orgComms, earned, paidC, owedC, payMethod };
   };
   const geo    = orgData(GEO_ID, 'Geo Transportation');
   const speedy = orgData(SPEEDY_ID, 'Speedy Dumps Truck Co');
@@ -2271,7 +2287,7 @@ async function handleAdminDashboard(request, env) {
       </div>
     </div>
     <div style="display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap">
-      ${o.owedC>0?`<form action="/admin/org-mark-paid" method="POST" style="display:inline"><input type="hidden" name="driver_id" value="${o.driverId}"><button class="btn btn-sm" style="font-size:12px">Mark All Paid ($${(o.owedC/100).toFixed(2)})</button></form>`:''}
+      ${o.owedC>0?`<button class="btn btn-sm" onclick="openPayModal('${o.driverId}','${o.orgName}',${o.owedC},'${o.payMethod}')" style="font-size:12px">Pay Now ($${(o.owedC/100).toFixed(2)})</button>`:'<span style="font-size:12px;color:var(--acc)">✓ Paid up</span>'}
       <button class="btn btn-sm btn-ghost" onclick="toggleDetail('detail-${o.driverId}')" style="font-size:12px">View Details ▾</button>
     </div>
   </div>
@@ -2555,8 +2571,112 @@ ${conversionRows.map(c=>{const drv=drivers.find(d=>d.id===c.driver_id);return`<t
 </div>
 </details>
 
+<!-- PAYOUT HISTORY LEDGER -->
+<details style="background:var(--surf);border:1px solid var(--bdr);border-radius:16px;margin-bottom:20px;overflow:hidden">
+<summary style="padding:16px 20px;cursor:pointer;font-size:14px;font-weight:800;display:flex;align-items:center;justify-content:space-between">Payout Ledger — ${payouts.length} payment${payouts.length!==1?'s':''}</summary>
+<div style="padding:0 20px 20px">
+<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+  <button class="btn btn-sm btn-ghost" onclick="filterPayouts('')" style="font-size:12px">All (${payouts.length})</button>
+  <button class="btn btn-sm btn-ghost" onclick="filterPayouts('${GEO_DRIVER_ID}')" style="font-size:12px">Geo (${payouts.filter(p=>p.driver_id===GEO_DRIVER_ID).length})</button>
+  <button class="btn btn-sm btn-ghost" onclick="filterPayouts('${SPEEDY_DRIVER_ID}')" style="font-size:12px">Speedy (${payouts.filter(p=>p.driver_id===SPEEDY_DRIVER_ID).length})</button>
+</div>
+<div style="overflow-x:auto">
+<table id="payouts-table" style="min-width:700px">
+<tr><th>Date</th><th>Organization</th><th>Period</th><th>Amount</th><th>Method</th><th>Reference</th><th>Status</th><th>Notes</th></tr>
+${payouts.length ? payouts.map(p=>`<tr data-org="${p.driver_id}">
+  <td style="font-size:12px;color:var(--sub)">${new Date(p.paid_at||p.created_at).toLocaleDateString()}</td>
+  <td style="font-weight:600">${p.organization||'—'}</td>
+  <td style="font-size:12px;color:var(--sub)">${p.period_start?new Date(p.period_start+'T12:00:00').toLocaleDateString():'—'} – ${p.period_end?new Date(p.period_end+'T12:00:00').toLocaleDateString():'—'}</td>
+  <td style="color:var(--acc);font-weight:700">$${((p.amount_cents||0)/100).toFixed(2)}</td>
+  <td style="color:var(--sub);font-size:12px">${p.payment_method||'—'}</td>
+  <td style="font-size:12px;font-family:monospace">${p.payment_reference||'—'}</td>
+  <td><span class="badge ${p.status==='paid'?'badge-green':p.status==='processing'?'badge-yellow':'badge-red'}">${p.status}</span></td>
+  <td style="font-size:12px;color:var(--sub);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.notes||'—'}</td>
+</tr>`).join('') : '<tr><td colspan="8" style="color:var(--sub);text-align:center">No payouts recorded yet</td></tr>'}
+</table></div></div></details>
+
+<!-- PAY NOW MODAL -->
+<div id="pay-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:9999;align-items:center;justify-content:center;padding:20px">
+<div style="background:var(--surf);border:1px solid var(--bdr);border-radius:20px;max-width:480px;width:100%;padding:28px;position:relative">
+  <button onclick="closePayModal()" style="position:absolute;top:16px;right:16px;background:none;border:none;color:var(--sub);font-size:22px;cursor:pointer;line-height:1">✕</button>
+  <h2 style="margin-bottom:4px;font-size:18px">Record Payment</h2>
+  <p style="color:var(--sub);font-size:13px;margin-bottom:20px" id="pm-org-name">—</p>
+  <div class="msg-err" id="pm-err" style="display:none;background:#ef444412;border:1px solid #ef444440;color:#ef4444;padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:12px"></div>
+  <div style="background:var(--bg);border:1px solid var(--bdr);border-radius:12px;padding:14px;margin-bottom:16px">
+    <div style="font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Amount</div>
+    <div style="font-size:28px;font-weight:900;color:#f59e0b" id="pm-amount">$0.00</div>
+    <div style="font-size:11px;color:var(--sub);margin-top:6px">Payment method on file: <span id="pm-pay-method" style="color:var(--txt)">—</span></div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+    <div>
+      <label style="font-size:12px;color:var(--sub);display:block;margin-bottom:4px">Period Start</label>
+      <input type="date" id="pm-period-start" style="width:100%;background:#1e1e2e;border:1px solid var(--bdr);color:var(--txt);padding:8px 10px;border-radius:8px;font-size:13px;font-family:inherit;box-sizing:border-box">
+    </div>
+    <div>
+      <label style="font-size:12px;color:var(--sub);display:block;margin-bottom:4px">Period End</label>
+      <input type="date" id="pm-period-end" style="width:100%;background:#1e1e2e;border:1px solid var(--bdr);color:var(--txt);padding:8px 10px;border-radius:8px;font-size:13px;font-family:inherit;box-sizing:border-box">
+    </div>
+  </div>
+  <div style="margin-bottom:12px">
+    <label style="font-size:12px;color:var(--sub);display:block;margin-bottom:4px">Payment Reference <span style="color:#555">(PayPal TX, bank ref, Stripe transfer ID)</span></label>
+    <input type="text" id="pm-reference" placeholder="e.g. 3TF29840WD123456A" style="width:100%;background:#1e1e2e;border:1px solid var(--bdr);color:var(--txt);padding:10px 12px;border-radius:8px;font-size:13px;font-family:inherit;box-sizing:border-box">
+  </div>
+  <div style="margin-bottom:16px">
+    <label style="font-size:12px;color:var(--sub);display:block;margin-bottom:4px">Notes <span style="color:#555">(optional)</span></label>
+    <textarea id="pm-notes" rows="2" placeholder="e.g. Paid via PayPal 4/22/26..." style="width:100%;background:#1e1e2e;border:1px solid var(--bdr);color:var(--txt);padding:10px 12px;border-radius:8px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box"></textarea>
+  </div>
+  <div style="display:flex;gap:10px">
+    <button class="btn" style="flex:1" id="pm-confirm-btn" onclick="confirmPayment()">Confirm Payment</button>
+    <button class="btn btn-outline" style="flex:1" onclick="closePayModal()">Cancel</button>
+  </div>
+</div></div>
+
 <script>
+function filterPayouts(orgId){
+  document.querySelectorAll('#payouts-table tr[data-org]').forEach(r=>{
+    r.style.display=(orgId===''||r.dataset.org===orgId)?'':'none';
+  });
+}
 function toggleDetail(id){const el=document.getElementById(id);if(el)el.style.display=el.style.display==='none'?'block':'none';}
+
+let _pmDriverId='', _pmOwedCents=0, _pmOrgName='';
+function openPayModal(driverId, orgName, owedCents, payMethod){
+  _pmDriverId=driverId; _pmOwedCents=owedCents; _pmOrgName=orgName;
+  document.getElementById('pm-org-name').textContent=orgName;
+  document.getElementById('pm-amount').textContent='$'+(owedCents/100).toFixed(2);
+  document.getElementById('pm-pay-method').textContent=payMethod||'Not set';
+  document.getElementById('pm-err').style.display='none';
+  document.getElementById('pm-reference').value='';
+  document.getElementById('pm-notes').value='';
+  const now=new Date(); const y=now.getFullYear(), m=now.getMonth();
+  const start=new Date(y,m-1,1), end=new Date(y,m,0);
+  document.getElementById('pm-period-start').value=start.toISOString().slice(0,10);
+  document.getElementById('pm-period-end').value=end.toISOString().slice(0,10);
+  document.getElementById('pay-modal').style.display='flex';
+}
+function closePayModal(){document.getElementById('pay-modal').style.display='none';}
+
+async function confirmPayment(){
+  const ref=document.getElementById('pm-reference').value.trim();
+  const notes=document.getElementById('pm-notes').value.trim();
+  const periodStart=document.getElementById('pm-period-start').value;
+  const periodEnd=document.getElementById('pm-period-end').value;
+  const errEl=document.getElementById('pm-err');
+  if(!ref){errEl.textContent='Payment reference is required';errEl.style.display='block';return;}
+  if(!periodStart||!periodEnd){errEl.textContent='Period dates required';errEl.style.display='block';return;}
+  errEl.style.display='none';
+  const btn=document.getElementById('pm-confirm-btn');
+  btn.textContent='Processing...'; btn.disabled=true;
+  try {
+    const r=await fetch('/admin/pay-driver',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({driver_id:_pmDriverId,org_name:_pmOrgName,amount_cents:_pmOwedCents,
+        payment_reference:ref,notes,period_start:periodStart,period_end:periodEnd})});
+    const d=await r.json();
+    if(d.ok){closePayModal();location.reload();}
+    else{errEl.textContent=d.error||'Payment failed';errEl.style.display='block';}
+  } catch(e){errEl.textContent='Network error — check connection';errEl.style.display='block';}
+  finally{btn.textContent='Confirm Payment';btn.disabled=false;}
+}
 
 let curPeriod='week';
 async function setPeriod(p){
@@ -2574,7 +2694,6 @@ async function setPeriod(p){
     document.getElementById('as-speedy-earn').textContent='$'+((d.speedy?.earnings_cents||0)/100).toFixed(2);
   } catch(e){console.error(e);}
 }
-// Load week stats on mount
 setPeriod('week');
 </script>
 `);
@@ -2823,6 +2942,46 @@ async function handleAdminOrgMarkPaid(request, env) {
     await sbPatch(env, 'commissions', `id=eq.${c.id}`, { status:'paid', paid_at:new Date().toISOString() });
   }
   return Response.redirect(new URL('/admin/dashboard#payments', request.url).toString(), 302);
+}
+
+async function handleAdminPayDriver(request, env) {
+  if (!isAdminAuthed(request, env)) return jsonOk({ ok:false, error:'Unauthorized' });
+  let body;
+  try { body = await request.json(); } catch(e) { return jsonOk({ ok:false, error:'Invalid JSON' }); }
+  const { driver_id, org_name, amount_cents, payment_reference, notes, period_start, period_end } = body;
+  if (!driver_id || !amount_cents || !payment_reference) {
+    return jsonOk({ ok:false, error:'driver_id, amount_cents, and payment_reference are required' });
+  }
+  try {
+    // Look up driver's payment method
+    const driver = await sbGetOne(env, 'drivers', `id=eq.${driver_id}&select=id,payment_method_type,payment_details_paypal,payment_details_bank_name`);
+    if (!driver) return jsonOk({ ok:false, error:'Driver not found' });
+    const paymentMethod = driver.payment_method_type || 'manual';
+
+    // Insert payout record
+    const now = new Date().toISOString();
+    await sbPost(env, 'payouts', {
+      driver_id,
+      organization: org_name || null,
+      amount_cents: Math.round(amount_cents),
+      period_start: period_start || null,
+      period_end: period_end || null,
+      payment_method: paymentMethod,
+      payment_reference,
+      status: 'paid',
+      notes: notes || null,
+      paid_by: 'admin',
+      paid_at: now,
+    });
+
+    // Mark all pending commissions for this driver as paid
+    await sbPatch(env, 'commissions', `driver_id=eq.${driver_id}&status=eq.pending`, { status:'paid' });
+
+    return jsonOk({ ok:true });
+  } catch(e) {
+    console.error('handleAdminPayDriver error:', e.message);
+    return jsonOk({ ok:false, error:'Server error: ' + e.message });
+  }
 }
 
 async function handleApiStats(request, env) {
