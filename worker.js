@@ -30,7 +30,7 @@ const FALLBACK_AFFILIATES = [
 const T = {
   en: {
     hero_h1: 'Scan. Save. Score.',
-    hero_sub: 'Exclusive deals delivered straight to your phone — just scan the QR code on the truck.',
+    hero_sub: 'You\'re in. Sign up to get exclusive deals sent directly to your phone — even when you\'re not near a truck.',
     email_ph: 'Enter your email',
     cta_main: 'Get My Deal',
     featured_badge: 'FEATURED DEAL',
@@ -55,7 +55,7 @@ const T = {
   },
   es: {
     hero_h1: 'Escanea. Ahorra. Gana.',
-    hero_sub: 'Ofertas exclusivas directo a tu teléfono — solo escanea el código QR del camión.',
+    hero_sub: 'Ya estás adentro. Regístrate para recibir ofertas exclusivas directamente en tu teléfono — aunque no estés cerca del camión.',
     email_ph: 'Ingresa tu correo',
     cta_main: 'Obtener Mi Oferta',
     featured_badge: 'OFERTA DESTACADA',
@@ -823,7 +823,7 @@ ${DS}
 
 <section class="hero">
   <h1><span class="en">Scan. <span class="acc">Save.</span> Score.</span><span class="es">Escanea. <span class="acc">Ahorra.</span> Gana.</span></h1>
-  <p class="hero-sub"><span class="en">Exclusive deals delivered straight to your phone — just scan the QR code on the truck.</span><span class="es">Ofertas exclusivas directo a tu teléfono — solo escanea el código QR del camión.</span></p>
+  <p class="hero-sub"><span class="en">You're in. Sign up to get exclusive deals sent directly to your phone — even when you're not near a truck.</span><span class="es">Ya estás adentro. Regístrate para recibir ofertas exclusivas directamente en tu teléfono — aunque no estés cerca del camión.</span></p>
   <div id="hero-capture-wrap">
   <form class="hero-form" onsubmit="heroCapture(event)" style="flex-direction:column;align-items:stretch">
     <div style="display:flex;gap:10px;flex-wrap:wrap">
