@@ -30,7 +30,7 @@ const FALLBACK_AFFILIATES = [
 const T = {
   en: {
     hero_h1: 'Scan. Save. Score.',
-    hero_sub: 'Exclusive deals delivered straight to your phone — just scan the QR code on the truck.',
+    hero_sub: 'You\'re in. Sign up below and get exclusive deals sent directly to your phone — even when you\'re not near a truck.',
     email_ph: 'Enter your email',
     cta_main: 'Get My Deal',
     featured_badge: 'FEATURED DEAL',
@@ -55,7 +55,7 @@ const T = {
   },
   es: {
     hero_h1: 'Escanea. Ahorra. Gana.',
-    hero_sub: 'Ofertas exclusivas directo a tu teléfono — solo escanea el código QR del camión.',
+    hero_sub: 'Ya estás adentro. Regístrate y recibe ofertas exclusivas en tu teléfono — aunque no estés cerca del camión.',
     email_ph: 'Ingresa tu correo',
     cta_main: 'Obtener Mi Oferta',
     featured_badge: 'OFERTA DESTACADA',
@@ -808,8 +808,8 @@ ${DS}
   <div class="br-prog"><div class="br-fill" id="br-fill"></div></div>
   <div class="br-sub"><span class="en">Get alerts when new deals drop:</span><span class="es">Recibe alertas cuando lleguen nuevas ofertas:</span></div>
   <div class="br-form">
-    <input type="email" id="br-email" autocomplete="email" placeholder="Enter your email (optional)">
-    <input type="tel" id="br-phone" autocomplete="tel" placeholder="Phone number (optional)">
+    <input type="email" id="br-email" autocomplete="email" placeholder="Email (optional)">
+    <input type="tel" id="br-phone" autocomplete="tel" placeholder="Phone (optional)">
     <p class="tcpa-disc" style="font-size:10px;color:#555;line-height:1.5;margin:6px 0 8px"><span class="en">By tapping 'Alert Me + Continue', you expressly consent to receive recurring automated marketing text messages and emails from QR Perks at the contact info provided. Consent is not a condition of purchase. Msg frequency varies. Msg &amp; data rates may apply. Reply STOP to opt out, HELP for help. <a href="/leads-terms" style="color:#666">Terms</a> | <a href="/privacy" style="color:#666">Privacy Policy</a></span><span class="es">Al tocar 'Notifícarme + Continuar', usted consiente expresamente recibir mensajes de texto de marketing automatizados recurrentes y correos de QR Perks al número y correo proporcionados. El consentimiento no es condición de compra. La frecuencia varía. Tarifas aplican. Responda STOP para cancelar, HELP para ayuda. <a href="/leads-terms" style="color:#666">Términos</a> | <a href="/privacy" style="color:#666">Privacidad</a></span></p>
     <button class="br-btn" id="br-alert"><span class="en">Alert Me + Continue →</span><span class="es">Notifícarme + Continuar →</span></button>
     <button class="br-skip" id="br-skip"><span class="en">No Thank You — take me to the offer →</span><span class="es">No Gracias — llevarme a la oferta →</span></button>
@@ -826,14 +826,15 @@ ${DS}
 
 <section class="hero">
   <h1><span class="en">Scan. <span class="acc">Save.</span> Score.</span><span class="es">Escanea. <span class="acc">Ahorra.</span> Gana.</span></h1>
-  <p class="hero-sub"><span class="en">Exclusive deals delivered straight to your phone — just scan the QR code on the truck.</span><span class="es">Ofertas exclusivas directo a tu teléfono — solo escanea el código QR del camión.</span></p>
+  <p class="hero-sub"><span class="en">You're in. Sign up below and get exclusive deals sent directly to your phone — even when you're not near a truck.</span><span class="es">Ya estás adentro. Regístrate y recibe ofertas exclusivas en tu teléfono — aunque no estés cerca del camión.</span></p>
   <div id="hero-capture-wrap">
   <form class="hero-form" onsubmit="heroCapture(event)" style="flex-direction:column;align-items:stretch">
     <div style="display:flex;gap:10px;flex-wrap:wrap">
-      <input type="email" id="hero-email" name="email" placeholder="Enter your email (optional)" style="flex:1;min-width:180px">
-      <input type="tel" id="hero-phone" name="phone" placeholder="Phone number (optional)" autocomplete="tel" style="flex:1;min-width:160px">
+      <input type="email" id="hero-email" name="email" placeholder="Email (optional)" style="flex:1;min-width:180px">
+      <input type="tel" id="hero-phone" name="phone" placeholder="Phone (optional)" autocomplete="tel" style="flex:1;min-width:160px">
     </div>
     <p class="tcpa-disc"><span class="en">By tapping 'Get My Deal', you expressly consent to receive recurring automated marketing text messages and emails from QR Perks at the contact info provided. Consent is not a condition of purchase. Msg frequency varies. Msg &amp; data rates may apply. Reply STOP to opt out, HELP for help. <a href="/leads-terms">Terms</a> | <a href="/privacy">Privacy Policy</a></span><span class="es">Al tocar 'Obtener Mi Oferta', usted consiente expresamente recibir mensajes de texto de marketing automatizados recurrentes y correos electrónicos de QR Perks. El consentimiento no es condición de compra. La frecuencia varía. Tarifas aplican. Responda STOP para cancelar, HELP para ayuda. <a href="/leads-terms">Términos</a> | <a href="/privacy">Política de Privacidad</a></span></p>
+    <div id="hero-form-err" style="display:none;color:#ef4444;font-size:13px;text-align:center;margin-bottom:6px;padding:6px 10px;background:#ff000015;border-radius:6px"></div>
     <button type="button" class="btn" onclick="heroGetMyDeal()"><span class="en">Get My Deal</span><span class="es">Obtener Mi Oferta</span></button>
   </form>
   <div id="hero-thankyou" style="display:none;text-align:center;padding:16px 0;color:var(--acc);font-size:16px;font-weight:600"><span class="en">✅ You're on the list! Check your inbox.</span><span class="es">✅ ¡Estás en la lista! Revisa tu bandeja de entrada.</span></div>
@@ -901,12 +902,12 @@ function setLang(l){
   if(esBtn){esBtn.classList.toggle('active',l==='es');}
   const br=document.getElementById('br-email');
   const bp=document.getElementById('br-phone');
-  if(br)br.placeholder=l==='en'?'Your email (optional)':'Tu correo (opcional)';
-  if(bp)bp.placeholder=l==='en'?'Phone for SMS alerts (optional)':'Teléfono para SMS (opcional)';
+  if(br)br.placeholder=l==='en'?'Email (optional)':'Correo (opcional)';
+  if(bp)bp.placeholder=l==='en'?'Phone (optional)':'Teléfono (opcional)';
   const hi=document.getElementById('hero-email');
-  if(hi)hi.placeholder=l==='en'?'Enter your email':'Ingresa tu correo';
+  if(hi)hi.placeholder=l==='en'?'Email (optional)':'Correo (opcional)';
   const hp=document.getElementById('hero-phone');
-  if(hp)hp.placeholder=l==='en'?'Phone number (optional)':'Número de teléfono (opcional)';
+  if(hp)hp.placeholder=l==='en'?'Phone (optional)':'Teléfono (opcional)';
 }
 setLang(getLang());
 
@@ -982,36 +983,39 @@ function openBridge(affiliateId, subId, nameEn, nameEs){
 }
 function closeBridge(){clearTimeout(autoTimer);clearTimeout(pauseResumeTimer);document.getElementById('bridge').classList.remove('show');document.getElementById('br-fill').style.width='0';bridgePaused=false;timerRemaining=BRIDGE_SECS*1000;}
 function doRedirect(){if(bridgeUrl){window.location.href=bridgeUrl;}closeBridge();}
-function heroCapture(e){
-  e.preventDefault();
-  const email=document.getElementById('hero-email').value.trim();
-  if(email&&!email.includes('@')) return;
-  const phone=(document.getElementById('hero-phone')?.value||'').trim()||null;
-  if(!email&&!phone) return;
-  const lang=getLang();
-  fetch('/api/email-capture',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({email,phone,source:TRUCK_ID||'hero',offer_clicked:'signup',lang})}).then(r=>r.json()).then(d=>{
-    if(d.ok){
-      setLeadCapture();
-      const w=document.getElementById('hero-capture-wrap');const ty=document.getElementById('hero-thankyou');
-      if(w&&ty){w.querySelector('form').style.display='none';ty.style.display='block';}
-      // Go directly to first offer — no interstitial since they just submitted the form
-      if(affiliates && affiliates.length){
-        setTimeout(()=>{window.location.href='/go/'+affiliates[0].id+'?t='+(TRUCK_ID||'web');},1500);
-      }
-    }
-  }).catch(()=>{});
-}
-const affiliates=${JSON.stringify(affiliates.map(a=>({id:a.id,prize_description:a.prize_description,prize_description_es:a.prize_description_es,name:a.name})))};
+function heroCapture(e){ e.preventDefault(); heroGetMyDeal(); }
+const affiliates=${JSON.stringify(affiliates.map(a=>({id:a.id,prize_description:a.prize_description,prize_description_es:a.prize_description_es,name:a.name,is_featured:a.is_featured})))};
 function heroGetMyDeal(){
+  const email=(document.getElementById('hero-email')?.value||'').trim();
+  const phone=(document.getElementById('hero-phone')?.value||'').trim();
+  const errEl=document.getElementById('hero-form-err');
+  const lang=getLang();
+  // Already captured — go direct immediately
   if(hasLeadCapture()){
-    if(affiliates&&affiliates.length) window.location.href='/go/'+affiliates[0].id+'?t='+(TRUCK_ID||'web');
+    const feat=affiliates.find(function(a){return a.is_featured;})||affiliates[0];
+    if(feat) window.location.href='/go/'+feat.id+'?t='+(TRUCK_ID||'web');
     return;
   }
-  if(affiliates&&affiliates.length){
-    var a=affiliates[0];
-    openBridge(a.id, TRUCK_ID||'web', a.prize_description||a.name, a.prize_description_es||a.name);
+  // Validate: at least one field required
+  if(!email&&!phone){
+    if(errEl){
+      errEl.textContent=lang==='es'?'Por favor ingresa tu correo o teléfono para continuar':'Please enter your email or phone to continue';
+      errEl.style.display='block';
+    }
+    const emailEl=document.getElementById('hero-email');
+    if(emailEl) emailEl.focus();
+    return;
   }
+  // Clear error
+  if(errEl) errEl.style.display='none';
+  // Submit capture (fire-and-forget — don't wait for response to redirect)
+  fetch('/api/email-capture',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({email:email||null,phone:phone||null,source:TRUCK_ID||'hero',offer_clicked:'signup',lang:lang})
+  }).catch(function(){});
+  setLeadCapture();
+  // Redirect DIRECTLY to featured offer — no bridge, no countdown, instant
+  const feat=affiliates.find(function(a){return a.is_featured;})||affiliates[0];
+  if(feat) window.location.href='/go/'+feat.id+'?t='+(TRUCK_ID||'web');
 }
 </script>
 </body></html>`);
@@ -1573,7 +1577,7 @@ ${trucks.length===0?'<div class="dsec"><p style="color:var(--sub)">No trucks ass
   <input type="text" id="tnm-${n}" value="${t.truck_name||''}" placeholder="e.g. Main Street Truck" style="flex:1;min-width:160px;max-width:280px;padding:6px 10px;font-size:13px;background:#1e1e2e;border:1px solid var(--bdr);color:var(--txt);border-radius:8px">
   <button class="btn btn-sm btn-ghost" onclick="saveTruckName('t${n}','${n}')" style="font-size:12px">Save Name</button>
 </div>
-<div style="display:flex;justify-content:center;align-items:center;margin:20px 0" id="qrimg-${n}"><div style="background:white;padding:16px;border-radius:8px;display:inline-flex;max-width:220px;border:1px solid #e5e7eb">${imgHtml}</div></div>
+<div style="margin:20px auto;max-width:220px;text-align:center" id="qrimg-${n}">${imgHtml}</div>
 <p style="text-align:center;color:var(--sub);font-size:12px;margin-bottom:16px">${qrUrl}</p>
 <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
 <button class="btn btn-sm" onclick="downloadQR('t${n}','svg')" style="font-size:12px">⬇ SVG</button>
