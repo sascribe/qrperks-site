@@ -3189,29 +3189,38 @@ async function handleApiConversion(request, env) {
         await sbPatch(env, 'conversions', `id=eq.${conv.id}`, { commission_calculated: true });
       }
 
-      // Update driver total_earnings_cents
-      const driver  = await sbGetOne(env, 'drivers', `id=eq.${driverId}&select=total_earnings_cents`);
+      // Update driver total_earnings_cents AND direct_earnings (dollars, numeric column)
+      const driver  = await sbGetOne(env, 'drivers', `id=eq.${driverId}&select=total_earnings_cents,direct_earnings,referred_by_driver_id`);
       const current = driver?.total_earnings_cents || 0;
+      const currentDirect = parseFloat(driver?.direct_earnings || 0);
       await sbPatch(env, 'drivers', `id=eq.${driverId}`, {
         total_earnings_cents: current + commissionCents,
+        direct_earnings: parseFloat((currentDirect + commissionCents / 100).toFixed(4)),
       });
 
       // Referral override (10% to referrer)
-      const refs = await sbGet(env, 'referrals', `referred_driver_id=eq.${driverId}&select=referrer_driver_id`);
-      if (refs[0]?.referrer_driver_id) {
+      // Primary: driver.referred_by_driver_id; fallback: referrals table
+      let referrerId = driver?.referred_by_driver_id || null;
+      if (!referrerId) {
+        const refs = await sbGet(env, 'referrals', `referred_driver_id=eq.${driverId}&select=referrer_driver_id`);
+        referrerId = refs[0]?.referrer_driver_id || null;
+      }
+      if (referrerId) {
         const refAmt = Math.floor(payoutCents * 0.10);
         await sbPost(env, 'commissions', {
-          driver_id:           refs[0].referrer_driver_id,
+          driver_id:           referrerId,
           conversion_id:       conv?.id || null,
           type:                'referral_override',
           gross_amount_cents:  payoutCents,
           driver_amount_cents: refAmt,
           status:              'pending',
         });
-        const referrer    = await sbGetOne(env, 'drivers', `id=eq.${refs[0].referrer_driver_id}&select=total_earnings_cents`);
-        const refCurrent  = referrer?.total_earnings_cents || 0;
-        await sbPatch(env, 'drivers', `id=eq.${refs[0].referrer_driver_id}`, {
+        const referrer        = await sbGetOne(env, 'drivers', `id=eq.${referrerId}&select=total_earnings_cents,referral_earnings`);
+        const refCurrent      = referrer?.total_earnings_cents || 0;
+        const refCurrentEarns = parseFloat(referrer?.referral_earnings || 0);
+        await sbPatch(env, 'drivers', `id=eq.${referrerId}`, {
           total_earnings_cents: refCurrent + refAmt,
+          referral_earnings: parseFloat((refCurrentEarns + refAmt / 100).toFixed(4)),
         });
       }
     }
