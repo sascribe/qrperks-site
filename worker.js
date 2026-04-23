@@ -212,6 +212,7 @@ async function route(request, env, ctx) {
   if ((path === '/admin' || path === '/admin/login') && method === 'GET')  return handleAdminLoginPage(request, env);
   if ((path === '/admin' || path === '/admin/login') && method === 'POST') return handleAdminLoginPost(request, env);
   if (path === '/admin/dashboard'             && method === 'GET')  return handleAdminDashboard(request, env);
+  if (path === '/admin/add-driver'            && method === 'POST') return handleAdminAddDriver(request, env);
   if (path === '/admin/approve-driver'        && method === 'POST') return handleAdminApproveDriver(request, env);
   if (path === '/admin/deny-driver'           && method === 'POST') return handleAdminDenyDriver(request, env);
   if (path === '/admin/commissions/calculate' && method === 'POST') return handleAdminCalcCommissions(request, env);
@@ -1481,7 +1482,6 @@ async function dSetPeriod(p){
   } catch(e){console.error(e);}
 }
 dSetPeriod('week');
-</script>
 async function savePayment(){
   const type=document.getElementById('pay-type').value;
   const detail=document.getElementById('pay-detail').value.trim();
@@ -1573,7 +1573,7 @@ ${trucks.length===0?'<div class="dsec"><p style="color:var(--sub)">No trucks ass
   <input type="text" id="tnm-${n}" value="${t.truck_name||''}" placeholder="e.g. Main Street Truck" style="flex:1;min-width:160px;max-width:280px;padding:6px 10px;font-size:13px;background:#1e1e2e;border:1px solid var(--bdr);color:var(--txt);border-radius:8px">
   <button class="btn btn-sm btn-ghost" onclick="saveTruckName('t${n}','${n}')" style="font-size:12px">Save Name</button>
 </div>
-<div style="text-align:center;margin:20px 0" id="qrimg-${n}"><div style="background:white;padding:16px;border-radius:8px;display:inline-block;max-width:220px;border:1px solid #e5e7eb">${imgHtml}</div></div>
+<div style="display:flex;justify-content:center;align-items:center;margin:20px 0" id="qrimg-${n}"><div style="background:white;padding:16px;border-radius:8px;display:inline-flex;max-width:220px;border:1px solid #e5e7eb">${imgHtml}</div></div>
 <p style="text-align:center;color:var(--sub);font-size:12px;margin-bottom:16px">${qrUrl}</p>
 <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
 <button class="btn btn-sm" onclick="downloadQR('t${n}','svg')" style="font-size:12px">⬇ SVG</button>
@@ -2140,24 +2140,33 @@ async function handleDriverFleetPost(request, env, driver) {
       const existing = await sbGet(env, 'trucks', `driver_id=eq.${driver.id}&select=id`);
       if (existing.length >= 10) return jsonOk({ ok:false, error:'Maximum 10 trucks per driver' });
 
-      // Find next available truck number
-      const allTrucks = await sbGet(env, 'trucks', 'select=id');
-      const nums = allTrucks.map(t=>parseInt(t.id.replace('t',''))).filter(n=>!isNaN(n));
-      const nextNum = nums.length ? Math.max(...nums) + 1 : 1;
-      const newId = `t${nextNum}`;
-
-      // Generate QR SVG for the new truck
-      const qrUrl = `https://qr-perks.com/${newId}`;
-      const svg = generateQRSvg(qrUrl);
-
-      // Create truck row
-      await sbPost(env, 'trucks', {
-        id: newId,
-        driver_id: driver.id,
-        status: 'active',
-        truck_name: truck_name || null,
-        qr_code_svg: svg,
-      });
+      // Find lowest unassigned inactive truck slot first; else create new
+      const unassigned = await sbGet(env, 'trucks', 'driver_id=is.null&status=eq.inactive&select=id&order=id.asc&limit=1');
+      let assignId = null;
+      if (unassigned.length) {
+        assignId = unassigned[0].id;
+        await sbPatch(env, 'trucks', `id=eq.${assignId}`, {
+          driver_id: driver.id,
+          status: 'active',
+          truck_name: truck_name || null,
+        });
+      } else {
+        // Create new truck with next sequential ID
+        const allTrucks = await sbGet(env, 'trucks', 'select=id');
+        const nums = allTrucks.map(t=>parseInt(t.id.replace('t',''))).filter(n=>!isNaN(n));
+        const nextNum = nums.length ? Math.max(...nums) + 1 : 1;
+        assignId = `t${nextNum}`;
+        const qrUrl = `https://qr-perks.com/${assignId}`;
+        const svg = generateQRSvg(qrUrl);
+        await sbPost(env, 'trucks', {
+          id: assignId,
+          driver_id: driver.id,
+          status: 'active',
+          truck_name: truck_name || null,
+          qr_code_svg: svg,
+        });
+      }
+      const newId = assignId;
       return jsonOk({ ok:true, truck_id:newId });
     }
 
@@ -2345,12 +2354,13 @@ ${d.status==='active'?`<form action="/admin/deny-driver" method="POST" style="di
 
   return adminShell('Dashboard', `
 <style>
-.acoll{border:1px solid var(--bdr);border-radius:12px;margin-bottom:12px;overflow:hidden}
-.acoll summary{padding:14px 18px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;font-size:14px;font-weight:700;user-select:none;list-style:none;background:var(--surf)}
+.acoll{border:1px solid var(--bdr);border-radius:12px;margin-bottom:12px;overflow:hidden;background:var(--surf)}
+.acoll summary{padding:14px 18px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;font-size:14px;font-weight:700;user-select:none;list-style:none;background:var(--surf);color:var(--txt);outline:none}
 .acoll summary::-webkit-details-marker{display:none}
-.acoll summary::after{content:'▾';color:var(--sub);font-size:12px;transition:transform .2s}
-details[open] .acoll summary::after{transform:rotate(180deg)}
-.acoll-body{padding:16px 18px;border-top:1px solid var(--bdr)}
+.acoll summary::after{content:'❯';color:var(--sub);font-size:11px;transition:transform .2s;flex-shrink:0;margin-left:8px}
+details[open] .acoll summary::after{transform:rotate(90deg)}
+.acoll summary:hover{background:#1a1a2a}
+.acoll-body{padding:16px 18px;border-top:1px solid var(--bdr);background:var(--bg)}
 .pstat-btn{background:transparent;border:1px solid var(--bdr);color:var(--sub);padding:6px 14px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;transition:all .15s}
 .pstat-btn.active{background:var(--acc);color:#000;border-color:var(--acc)}
 .pstat-box{text-align:center;padding:16px;background:var(--surf);border:1px solid var(--bdr);border-radius:12px}
@@ -2429,14 +2439,17 @@ ${orgCard(speedy)}
 <!-- TRUCK ASSIGNMENTS -->
 <details open id="trucks">
 <div class="acoll">
-<summary>Truck Assignments — ${trucksAssigned} active</summary>
+<summary>Truck Assignments — ${trucksAssigned} active · ${trucks.length} total</summary>
 <div class="acoll-body">
-<table><tr><th>Truck</th><th>Name</th><th>Assigned Driver</th><th>Status</th><th style="text-align:right">Action</th></tr>
-${trucks.map(t=>{const drv=drivers.find(d=>d.id===t.driver_id);return`<tr>
+<div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+  <button class="btn btn-sm btn-ghost" id="truck-toggle-btn" onclick="toggleAllTrucks()" style="font-size:12px">Show All (${trucks.length})</button>
+</div>
+<table id="truck-table"><tr><th>Truck</th><th>Name</th><th>Assigned Driver</th><th>Status</th><th style="text-align:right">Action</th></tr>
+${trucks.map(t=>{const drv=drivers.find(d=>d.id===t.driver_id);const isActive=t.status==='active';return`<tr class="truck-row ${isActive?'truck-active':'truck-inactive'}" style="${isActive?'':'display:none'}">
 <td style="font-weight:700">${t.id.toUpperCase()}</td>
 <td style="color:var(--sub);font-size:13px">${t.truck_name||'—'}</td>
 <td>${drv?`<span style="font-weight:600">${drv.company_name||drv.name}</span>`:`<span style="color:var(--sub)">Unassigned</span>`}</td>
-<td><span class="badge ${t.status==='active'?'badge-green':'badge-yellow'}">${t.status}</span></td>
+<td><span style="display:inline-flex;align-items:center;gap:5px;font-size:12px"><span style="width:8px;height:8px;border-radius:50%;background:${isActive?'#00ff88':'#555'};flex-shrink:0;display:inline-block"></span>${t.status}</span></td>
 <td style="text-align:right">
 <form action="/admin/assign-truck" method="POST" style="display:inline;display:flex;gap:6px;justify-content:flex-end;align-items:center">
 <input type="hidden" name="truck_id" value="${t.id}">
@@ -2460,6 +2473,16 @@ ${realDrivers.map(d=>`<option value="${d.id}" ${t.driver_id===d.id?'selected':''
 <table><tr><th>Company</th><th>Email</th><th>Status</th><th>W9</th><th>Ref Code</th><th style="text-align:right">Actions</th></tr>
 ${drivers.map(drRow).join('')||'<tr><td colspan="6" style="color:var(--sub);padding:12px 0">No drivers yet</td></tr>'}
 </table>
+<div style="margin-top:20px;padding-top:18px;border-top:1px solid var(--bdr)">
+  <div style="font-size:13px;font-weight:700;margin-bottom:12px;color:var(--sub);text-transform:uppercase;letter-spacing:1px">Add New Driver</div>
+  <form action="/admin/add-driver" method="POST" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;max-width:600px">
+    <div><label style="font-size:11px;color:var(--sub);display:block;margin-bottom:4px">Company Name</label><input name="company_name" required placeholder="e.g. Acme Hauling" style="width:100%;background:#1e1e2e;border:1px solid var(--bdr);color:var(--txt);padding:8px 10px;border-radius:8px;font-size:13px;font-family:inherit;box-sizing:border-box"></div>
+    <div><label style="font-size:11px;color:var(--sub);display:block;margin-bottom:4px">Email</label><input name="email" type="email" required placeholder="driver@company.com" style="width:100%;background:#1e1e2e;border:1px solid var(--bdr);color:var(--txt);padding:8px 10px;border-radius:8px;font-size:13px;font-family:inherit;box-sizing:border-box"></div>
+    <div><label style="font-size:11px;color:var(--sub);display:block;margin-bottom:4px">Password</label><input name="password" type="password" required placeholder="Temporary password" style="width:100%;background:#1e1e2e;border:1px solid var(--bdr);color:var(--txt);padding:8px 10px;border-radius:8px;font-size:13px;font-family:inherit;box-sizing:border-box"></div>
+    <div><label style="font-size:11px;color:var(--sub);display:block;margin-bottom:4px">Assign Truck (optional)</label><select name="truck_id" style="width:100%;background:#1e1e2e;border:1px solid var(--bdr);color:var(--txt);padding:8px 10px;border-radius:8px;font-size:13px;font-family:inherit;box-sizing:border-box"><option value="">— No truck yet —</option>${trucks.filter(t=>!t.driver_id).map(t=>`<option value="${t.id}">${t.id.toUpperCase()}${t.truck_name?' — '+t.truck_name:''}</option>`).join('')}</select></div>
+    <div style="grid-column:1/-1"><button class="btn" style="font-size:13px;padding:8px 20px">Create Driver Account</button></div>
+  </form>
+</div>
 </div>
 </div>
 </details>
@@ -2660,6 +2683,13 @@ function filterPayouts(orgId){
   });
 }
 function toggleDetail(id){const el=document.getElementById(id);if(el)el.style.display=el.style.display==='none'?'block':'none';}
+var _showingAllTrucks=false;
+function toggleAllTrucks(){
+  _showingAllTrucks=!_showingAllTrucks;
+  document.querySelectorAll('.truck-inactive').forEach(function(r){r.style.display=_showingAllTrucks?'':'none';});
+  var btn=document.getElementById('truck-toggle-btn');
+  if(btn)btn.textContent=_showingAllTrucks?'Show Active Only':'Show All ('+document.querySelectorAll('.truck-row').length+')';
+}
 
 let _pmDriverId='', _pmOwedCents=0, _pmOrgName='';
 function openPayModal(driverId, orgName, owedCents, payMethod){
@@ -2721,6 +2751,36 @@ setPeriod('week');
 `);
 }
 
+
+async function handleAdminAddDriver(request, env) {
+  if (!isAdminAuthed(request, env)) return Response.redirect(new URL('/admin/login', request.url).toString(), 302);
+  try {
+    const form = await request.formData();
+    const company_name = (form.get('company_name')||'').trim();
+    const email = (form.get('email')||'').trim().toLowerCase();
+    const password = (form.get('password')||'').trim();
+    const truck_id = (form.get('truck_id')||'').trim();
+    if (!company_name||!email||!password) return Response.redirect(new URL('/admin/dashboard#drivers', request.url).toString(), 302);
+    const existing = await sbGet(env, 'drivers', `email=eq.${encodeURIComponent(email)}&select=id`);
+    if (existing.length) return Response.redirect(new URL('/admin/dashboard#drivers', request.url).toString(), 302);
+    const password_hash = await hashPassword(password);
+    const referral_code = genReferralCode();
+    const newDriver = await sbPost(env, 'drivers', {
+      email,
+      company_name,
+      name: company_name,
+      password_hash,
+      referral_code,
+      status: 'active',
+      created_at: new Date().toISOString(),
+    });
+    // Assign truck if specified
+    if (truck_id && newDriver && newDriver.id) {
+      await sbPatch(env, 'trucks', `id=eq.${truck_id}`, { driver_id: newDriver.id, status: 'active' });
+    }
+  } catch(e) { console.error('Add driver error:', e.message); }
+  return Response.redirect(new URL('/admin/dashboard#drivers', request.url).toString(), 302);
+}
 
 async function handleAdminApproveDriver(request, env) {
   if (!isAdminAuthed(request, env)) return Response.redirect(new URL('/admin/login', request.url).toString(), 302);
@@ -2911,7 +2971,7 @@ async function handleApiPeriodStats(request, env) {
       if (truckIds.length === 0) return jsonOk({ clicks:0, conversions:0, earnings_cents:0 });
       const tf = `truck_id=in.(${truckIds.join(',')})`;
       const [scans, convs] = await Promise.all([
-        sbGet(env, 'scans', `${tf}&created_at=gte.${cutoffIso}&select=id`),
+        sbGet(env, 'scans', `${tf}&created_at=gte.${cutoffIso}&select=id,truck_id`),
         sbGet(env, 'conversions', `${tf}&created_at=gte.${cutoffIso}&select=commission_amount_cents,truck_id`),
       ]);
       const by_truck={};
