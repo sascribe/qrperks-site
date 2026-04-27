@@ -1,7 +1,7 @@
 // QR-Perks Cloudflare Worker — v5 Full Platform Fix 2026-04-13
 // Env: SUPABASE_URL, SUPABASE_SECRET, ADMIN_PASSWORD,
 // PHYSICAL_ADDRESS — update to your registered business address (required by CAN-SPAM)
-const PHYSICAL_ADDRESS = '1945 S. Laurel Pl., Ontario, CA 91762';
+const PHYSICAL_ADDRESS = '[Business Address]';
 //      RESEND_API_KEY, DRIVER_JWT_SECRET, W9_ENCRYPTION_KEY
 
 const FALLBACK_AFFILIATES = [
@@ -234,6 +234,7 @@ async function route(request, env, ctx) {
   if (path === '/admin/pay-driver'    && method === 'POST')           return handleAdminPayDriver(request, env);
   if (path === '/api/truck-name'   && method === 'POST')              return handleApiTruckName(request, env);
   if (path === '/api/save-qr-code' && method === 'POST')              return handleSaveQrCode(request, env);
+  if (path === '/api/w9-upload'     && method === 'POST')              return requireDriver(request, env, handleApiW9Upload);
   if (path === '/api/sms-webhook'  && method === 'POST')              return handleSmsWebhook(request, env);
   if (path === '/api/conversion'            && method === 'GET')               return handleApiConversion(request, env);
   if (path === '/admin/leads/export'        && method === 'GET')               return handleAdminLeadsExport(request, env);
@@ -495,6 +496,28 @@ function emailPasswordReset(token, recipientEmail='') {
 <a href="${link}" class="btn">Reset Password →</a>
 <p class="dim">Link expires in 1 hour.</p>
 </div>`, recipientEmail);
+}
+
+function emailDriverApplied(driver) {
+  const refLink = `https://qr-perks.com/join?ref=${driver.referral_code||''}`;
+  const unsub = `https://qr-perks.com/unsubscribe?email=${encodeURIComponent(driver.email)}`;
+  return emailBase(`<div class="card">
+<div class="tag">APPLICATION RECEIVED</div>
+<h1>You\'re almost in, ${driver.name}! 🎉</h1>
+<p>Thanks for applying to QR Perks. Here\'s what happens next:</p>
+<ol style="color:#ccc;font-size:14px;line-height:2">
+  <li>Verify your email (check your inbox — link expires in 24 hours)</li>
+  <li>An admin will review and activate your account</li>
+  <li>Get your truck QR codes and start earning</li>
+</ol>
+<p>Once active, share your referral link to earn <strong>10%</strong> of every referral\'s commissions — forever:</p>
+<code style="display:block;padding:10px;background:#f5f5f5;border-radius:6px;font-size:13px;word-break:break-all">${refLink}</code>
+<a href="https://qr-perks.com/driver/dashboard" class="btn" style="margin-top:16px">Go to Dashboard →</a>
+<p style="font-size:12px;color:#888;margin-top:20px;border-top:1px solid #eee;padding-top:12px">
+  You received this because you applied at qr-perks.com.<br>
+  <a href="${unsub}" style="color:#888">Unsubscribe</a>
+</p>
+</div>`, driver.email);
 }
 
 function emailW9Confirmation(driver) {
@@ -1126,18 +1149,40 @@ async function handleDriverSignupPage(request, env) {
   <div class="form-group"><label>Full Name</label><input type="text" id="nm" required autocomplete="name"></div>
   <div class="form-group"><label>Email</label><input type="email" id="em" required autocomplete="email"></div>
   <div class="form-group"><label>Phone (optional)</label><input type="tel" id="ph" autocomplete="tel"></div>
-  <div class="form-group"><label>Password (min 8 characters)</label><input type="password" id="pw" required minlength="8" autocomplete="new-password"></div>
-  <div class="form-group"><label>Confirm Password</label><input type="password" id="pw2" required minlength="8" autocomplete="new-password"></div>
+  <div class="form-group"><label>Password</label><input type="password" id="pw" required minlength="8" autocomplete="new-password" oninput="checkPw()">
+  <div id="pw-hints" style="margin-top:8px;display:none;font-size:12px;line-height:2">
+    <span id="ph-len" style="color:#ef4444">✗ At least 8 characters</span><br>
+    <span id="ph-num" style="color:#ef4444">✗ At least 1 number</span><br>
+    <span id="ph-let" style="color:#ef4444">✗ At least 1 letter</span>
+  </div></div>
+  <div class="form-group"><label>Confirm Password</label><input type="password" id="pw2" required minlength="8" autocomplete="new-password" oninput="checkPw2()">
+  <div id="pw2-hint" style="margin-top:6px;font-size:12px;display:none;color:#ef4444">✗ Passwords do not match</div></div>
   ${ref?`<div class="form-group"><label>Referred By</label><input type="text" id="ref" value="${ref}" readonly style="color:var(--acc);opacity:.8"></div>`:'<div class="form-group"><label>Referral Code (optional)</label><input type="text" id="ref"></div>'}
   <p style="font-size:10px;color:#555;line-height:1.5;margin:12px 0 8px;padding:10px;background:#0f0f18;border-radius:8px;border:1px solid #1e1e2e">By clicking 'Apply Now', you expressly consent to receive automated text messages and emails from QR Perks at the contact info provided (for account notifications, payout alerts, and platform updates). Consent is not a condition of receiving commissions. Msg &amp; data rates may apply. Reply STOP to opt out. <a href="/privacy" style="color:#666">Privacy Policy</a></p>
   <button class="btn btn-full" id="sbtn" onclick="doSignup()">Apply Now →</button>
 </div>
 <div class="auth-links">Already have an account? <a href="/driver/login">Log in</a></div>`,
 `<script>
+function checkPw(){
+  const v=document.getElementById('pw').value;
+  const h=document.getElementById('pw-hints');h.style.display='block';
+  const ok=(c,id)=>{const el=document.getElementById(id);el.style.color=c?'#00ff88':'#ef4444';el.textContent=(c?'✓':'✗')+el.textContent.slice(1);};
+  ok(v.length>=8,'ph-len');ok(/[0-9]/.test(v),'ph-num');ok(/[a-zA-Z]/.test(v),'ph-let');
+  checkPw2();
+}
+function checkPw2(){
+  const p=document.getElementById('pw').value,p2=document.getElementById('pw2').value;
+  const h=document.getElementById('pw2-hint');
+  if(!p2){h.style.display='none';return;}
+  h.style.display='block';
+  h.style.color=p===p2?'#00ff88':'#ef4444';h.textContent=p===p2?'✓ Passwords match':'✗ Passwords do not match';
+}
 async function doSignup(){
   const e=document.getElementById('err'),o=document.getElementById('ok'),btn=document.getElementById('sbtn');
   e.classList.remove('show');
-  if(document.getElementById('pw').value!==document.getElementById('pw2').value){e.textContent='Passwords do not match';e.classList.add('show');return;}
+  const pw=document.getElementById('pw').value;
+  if(pw.length<8||!/[0-9]/.test(pw)||!/[a-zA-Z]/.test(pw)){e.textContent='Password must be at least 8 characters with a number and a letter';e.classList.add('show');checkPw();return;}
+  if(pw!==document.getElementById('pw2').value){e.textContent='Passwords do not match';e.classList.add('show');return;}
   btn.disabled=true;btn.textContent='Submitting...';
   const r=await fetch('/driver/signup',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({name:document.getElementById('nm').value,email:document.getElementById('em').value,
@@ -1169,12 +1214,13 @@ async function handleDriverSignupPost(request, env) {
       const chk = await sbGetOne(env, 'drivers', `referral_code=eq.${referral_code}&select=id`);
       if (!chk) break;
     } while (++attempts<5);
-    const newDriver = await sbPost(env, 'drivers', { name, email, phone:phone||null, password_hash, referral_code, referred_by:referred_by||null, status:'pending', email_verified:false });
+    const newDriver = await sbPost(env, 'drivers', { name, email, phone:phone||null, password_hash, referral_code, referred_by:referred_by||null, referred_by_driver_id:referred_by||null, status:'pending', email_verified:false });
     if (!newDriver) return jsonOk({ ok:false, error:'Failed to create account. Please try again.' });
     if (referred_by) await sbPost(env, 'referrals', { referrer_driver_id:referred_by, referred_driver_id:newDriver.id });
     const verifyToken = genToken(32);
     await sbPost(env, 'email_verifications', { driver_id:newDriver.id, token:verifyToken, expires_at:new Date(Date.now()+86400000).toISOString() });
     await sendEmail(env, { to:email, subject:'Verify your QR Perks email', html:emailVerification(newDriver, verifyToken), template_name:'email_verification' });
+    sendEmail(env, { to:email, subject:'Welcome to QR Perks 🎉', html:emailDriverApplied(newDriver), template_name:'driver_applied' }).catch(()=>{});
     if (referrerDriver) {
       await sendEmail(env, { to:referrerDriver.email, subject:'Someone joined using your referral link', html:emailReferralSignup(referrerDriver, name), template_name:'referral_signup' });
     }
@@ -1190,7 +1236,10 @@ async function handleDriverVerifyEmail(request, env) {
   if (rec.verified) return Response.redirect(new URL('/driver/login?msg=verified', request.url).toString(), 302);
   if (new Date(rec.expires_at)<new Date()) return authShell('Verify Email', '<h1>Link Expired</h1><p class="auth-sub"><a href="/driver/signup">Sign up again</a> or contact support.</p>');
   await sbPatch(env, 'email_verifications', `id=eq.${rec.id}`, { verified:true });
-  await sbPatch(env, 'drivers', `id=eq.${rec.driver_id}`, { email_verified:true, email_verified_at:new Date().toISOString() });
+  const dvrRef = await sbGetOne(env, 'drivers', `id=eq.${rec.driver_id}&select=referred_by_driver_id`);
+  const patchFields = { email_verified:true, email_verified_at:new Date().toISOString() };
+  if (dvrRef?.referred_by_driver_id) patchFields.status = 'active';
+  await sbPatch(env, 'drivers', `id=eq.${rec.driver_id}`, patchFields);
   return Response.redirect(new URL('/driver/login?msg=verified', request.url).toString(), 302);
 }
 
@@ -1526,6 +1575,11 @@ async function handleDriverQrCodes(request, env, driver) {
   const testNotice = `<div style="background:#00ff8808;border:1px solid #00ff8830;border-radius:10px;padding:12px 16px;margin-top:16px;font-size:13px;color:#00ff8899">
 <strong style="color:#00ff88">EN:</strong> Please scan and test your QR code before sending to print to confirm it routes correctly to your offer page.<br>
 <strong style="color:#00ff88">ES:</strong> Por favor escanea y prueba tu código QR antes de enviarlo a imprimir para confirmar que dirige correctamente a tu página de ofertas.
+</div>
+<div style="background:#f59e0b10;border:1px solid #f59e0b30;border-radius:10px;padding:12px 16px;margin-top:10px;font-size:13px">
+<strong style="color:#f59e0b">Design Requirements:</strong><br>
+<span style="color:var(--sub)"><strong>EN:</strong> Badge must be at least <strong style="color:var(--txt)">8&rdquo;&thinsp;&times;&thinsp;24&rdquo;</strong> for visibility. Tagline is optional.</span><br>
+<span style="color:var(--sub)"><strong>ES:</strong> El badge debe medir al menos <strong style="color:var(--txt)">8&rdquo;&thinsp;&times;&thinsp;24&rdquo;</strong> para ser visible. El eslogan es opcional.</span>
 </div>`;
 
   return dashShell('QR Codes', 'qr-codes', `
@@ -1567,7 +1621,7 @@ ${trucks.length===0?'<div class="dsec"><p style="color:var(--sub)">No trucks ass
         imgHtml=`<img src="${qrEntry.data}" alt="QR Code Truck T${n}" style="max-width:220px;border:2px solid #00ff8840;border-radius:12px;padding:6px;background:#fff" loading="lazy">`;
         dataAttr=qrEntry.data;
       } else {
-        imgHtml=`<div style="background:white;border:2px solid #00ff8840;border-radius:12px;padding:12px;display:inline-block;max-width:220px">${qrEntry.data}</div>`;
+        imgHtml=`<div style="border:2px solid #00ff8840;border-radius:12px;padding:12px;display:inline-block;max-width:220px">${qrEntry.data}</div>`;
         dataAttr=qrEntry.data;
       }
     }
@@ -1587,7 +1641,15 @@ ${trucks.length===0?'<div class="dsec"><p style="color:var(--sub)">No trucks ass
 </div>
 ${testNotice}
 </div>`;
-  }).join('')}`,
+  }).join('')}
+<div class="dsec" style="margin-top:24px">
+<h2 style="margin-bottom:6px">Media Kit</h2>
+<p class="sub" style="margin-bottom:16px">Brand assets for print and digital use</p>
+<div style="display:flex;gap:12px;flex-wrap:wrap">
+  <a href="https://fsaxluprhgmyaipaujdn.supabase.co/storage/v1/object/public/brand-assets/QR-Perks-Logo.png" download="QR-Perks-Logo.png" class="btn btn-sm btn-ghost" style="font-size:13px;text-decoration:none">⬇ Logo (PNG)</a>
+  <a href="https://fsaxluprhgmyaipaujdn.supabase.co/storage/v1/object/public/brand-assets/QR-Perks-Banner.jpg" download="QR-Perks-Banner.jpg" class="btn btn-sm btn-ghost" style="font-size:13px;text-decoration:none">⬇ Banner (JPG)</a>
+</div>
+</div>`,
 `<script>
 ${needsAck?`document.getElementById('rck').addEventListener('change',function(){document.getElementById('rck-btn').disabled=!this.checked;});
 async function ackRules(){
@@ -1737,94 +1799,84 @@ async function handleDriverQrCodesPost(request, env, driver) {
 // ─── W9 ───
 async function handleDriverW9Page(request, env, driver) {
   if (driver.w9_submitted) return dashShell('W9', 'w9', `
-<h1>W9 Tax Form</h1><p class="sub">Already on file</p>
+<h1>Tax Form (W9)</h1><p class="sub">On file</p>
 <div class="dsec">
 <p style="color:var(--acc);margin-bottom:12px">✅ Your W9 has been received and is on file.</p>
+${driver.w9_document_url?`<p style="margin-bottom:14px"><a href="${driver.w9_document_url}" target="_blank" rel="noopener" class="btn btn-sm btn-ghost" style="font-size:13px">View Your Document →</a></p>`:''}
 <p style="color:var(--sub);font-size:14px">Need to make a correction? Email <a href="mailto:support@qr-perks.com">support@qr-perks.com</a> before your next payout.</p>
 </div>`);
 
-  const states = US_STATES.map(s=>`<option value="${s}">${s}</option>`).join('');
-  return dashShell('W9 Form', 'w9', `
-<h1>W9 Tax Form</h1>
-<p class="sub">Required for IRS reporting. Your Tax ID is encrypted and never shared.</p>
+  return dashShell('Tax Form (W9)', 'w9', `
+<h1>Tax Form (W9)</h1>
+<p class="sub">Required for payouts — no tax IDs stored on our servers</p>
 <div class="dsec">
 <div class="msg-err" id="err"></div>
-<div class="form-group"><label>Legal Name (as on tax return)</label><input type="text" id="ln" required></div>
-<div class="form-group"><label>Business Name (optional)</label><input type="text" id="bn"></div>
-<div class="form-group"><label>Tax ID Type</label>
-<div style="display:flex;gap:20px;margin-top:8px">
-<label style="display:flex;align-items:center;gap:8px;color:var(--txt);font-weight:normal;cursor:pointer;margin:0"><input type="radio" name="tit" value="ssn" style="width:auto;accent-color:var(--acc)"> Individual (SSN)</label>
-<label style="display:flex;align-items:center;gap:8px;color:var(--txt);font-weight:normal;cursor:pointer;margin:0"><input type="radio" name="tit" value="ein" style="width:auto;accent-color:var(--acc)"> Business (EIN)</label>
-</div></div>
-<div class="form-group"><label>Tax ID Number (SSN or EIN)</label><input type="text" id="tid" required placeholder="XXX-XX-XXXX" maxlength="11" autocomplete="off"></div>
-<div class="form-group"><label>Address</label><input type="text" id="a1" required autocomplete="address-line1" placeholder="Street address"></div>
-<div class="form-group"><label>Address Line 2 (optional)</label><input type="text" id="a2" autocomplete="address-line2" placeholder="Apt, suite, etc."></div>
-<div style="display:grid;grid-template-columns:1fr 80px 100px;gap:12px">
-<div class="form-group"><label>City</label><input type="text" id="city" required autocomplete="address-level2"></div>
-<div class="form-group"><label>State</label><select id="st" required><option value="">—</option>${states}</select></div>
-<div class="form-group"><label>ZIP</label><input type="text" id="zip" required maxlength="10" autocomplete="postal-code"></div>
+<div class="msg-ok" id="ok"></div>
+<h3 style="font-size:15px;margin-bottom:8px;color:var(--acc)">Step 1 — Download the Official W9</h3>
+<p style="color:var(--sub);font-size:14px;margin-bottom:14px">Print the form, fill it out completely, and sign it. Then upload below.</p>
+<a href="https://www.irs.gov/pub/irs-pdf/fw9.pdf" target="_blank" rel="noopener" class="btn btn-ghost" style="margin-bottom:24px;display:inline-block;font-size:14px">⬇ Download W9 PDF (IRS.gov) →</a>
+
+<h3 style="font-size:15px;margin-bottom:8px;color:var(--acc)">Step 2 — Upload Your Completed W9</h3>
+<p style="color:var(--sub);font-size:14px;margin-bottom:12px">Accepted: PDF, JPG, PNG. Max 10MB. Stored securely — never shared publicly.</p>
+<div class="form-group">
+  <label>Select File</label>
+  <input type="file" id="w9file" accept=".pdf,.jpg,.jpeg,.png" style="background:#1e1e2e;border:1px solid var(--bdr);color:var(--txt);padding:10px;border-radius:8px;width:100%;box-sizing:border-box;font-family:inherit">
 </div>
-<div class="form-group"><label>Signature</label>
-<canvas id="sig" style="width:100%;height:110px;background:#0f0f18;border:1.5px solid var(--bdr);border-radius:12px;cursor:crosshair;display:block;touch-action:none"></canvas>
-<button type="button" onclick="clearSig()" style="background:none;border:none;color:var(--sub);font-size:12px;cursor:pointer;margin-top:6px">Clear</button>
-</div>
-<div class="form-group"><label style="display:flex;align-items:flex-start;gap:10px;color:var(--sub);font-weight:normal;cursor:pointer">
-<input type="checkbox" id="cert" style="width:auto;margin-top:2px;accent-color:var(--acc)">
-Under penalties of perjury, I certify the information is accurate and complete.
-</label></div>
-<button class="btn btn-full" onclick="submitW9()">Submit W9 →</button>
+<button class="btn btn-full" id="w9btn" onclick="uploadW9()">Upload W9 →</button>
 </div>`,
 `<script>
-const c=document.getElementById('sig'),ctx=c.getContext('2d');
-c.width=c.offsetWidth*devicePixelRatio;c.height=c.offsetHeight*devicePixelRatio;
-ctx.scale(devicePixelRatio,devicePixelRatio);ctx.strokeStyle='#00ff88';ctx.lineWidth=2;ctx.lineCap='round';
-let draw=false,lx=0,ly=0;
-function pos(e){const r=c.getBoundingClientRect(),s=e.touches?e.touches[0]:e;return[s.clientX-r.left,s.clientY-r.top];}
-c.addEventListener('mousedown',e=>{draw=true;[lx,ly]=pos(e);});
-c.addEventListener('touchstart',e=>{e.preventDefault();draw=true;[lx,ly]=pos(e);});
-c.addEventListener('mousemove',e=>{if(!draw)return;const[x,y]=pos(e);ctx.beginPath();ctx.moveTo(lx,ly);ctx.lineTo(x,y);ctx.stroke();[lx,ly]=[x,y];});
-c.addEventListener('touchmove',e=>{e.preventDefault();if(!draw)return;const[x,y]=pos(e);ctx.beginPath();ctx.moveTo(lx,ly);ctx.lineTo(x,y);ctx.stroke();[lx,ly]=[x,y];});
-['mouseup','mouseleave','touchend'].forEach(ev=>c.addEventListener(ev,()=>draw=false));
-function clearSig(){ctx.clearRect(0,0,c.width,c.height);}
-async function submitW9(){
-  const err=document.getElementById('err');
-  err.classList.remove('show');
-  const tit=document.querySelector('input[name="tit"]:checked');
-  if(!tit){err.textContent='Select Tax ID type';err.classList.add('show');return;}
-  if(!document.getElementById('cert').checked){err.textContent='Please certify the information';err.classList.add('show');return;}
-  const sig_data=c.toDataURL();
-  if(sig_data.length<1000){err.textContent='Please provide your signature';err.classList.add('show');return;}
-  const r=await fetch('/driver/w9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-    legal_name:document.getElementById('ln').value,business_name:document.getElementById('bn').value,
-    tax_id_type:tit.value,tax_id:document.getElementById('tid').value,
-    address_line1:document.getElementById('a1').value,address_line2:document.getElementById('a2').value,
-    city:document.getElementById('city').value,state:document.getElementById('st').value,
-    zip:document.getElementById('zip').value,signature_data:sig_data
-  })});
-  const d=await r.json();
-  if(d.ok)window.location.reload();
-  else{err.textContent=d.error;err.classList.add('show');}
+async function uploadW9(){
+  const f=document.getElementById('w9file').files[0];
+  const err=document.getElementById('err'),ok=document.getElementById('ok'),btn=document.getElementById('w9btn');
+  err.classList.remove('show');ok.classList.remove('show');
+  if(!f){err.textContent='Please select a file';err.classList.add('show');return;}
+  if(f.size>10*1024*1024){err.textContent='File too large (max 10MB)';err.classList.add('show');return;}
+  const fd=new FormData();fd.append('file',f);
+  btn.disabled=true;btn.textContent='Uploading...';
+  try{
+    const r=await fetch('/api/w9-upload',{method:'POST',body:fd});
+    const d=await r.json();
+    if(d.ok){ok.textContent="W9 uploaded. We\'ll review it and notify you.";ok.classList.add('show');btn.style.display='none';}
+    else{err.textContent=d.error||'Upload failed. Try again.';err.classList.add('show');btn.disabled=false;btn.textContent='Upload W9 →';}
+  }catch(e2){err.textContent='Upload failed. Check your connection.';err.classList.add('show');btn.disabled=false;btn.textContent='Upload W9 →';}
 }
 </script>`);
 }
 
 async function handleDriverW9Post(request, env, driver) {
+  // Legacy endpoint — new uploads go through /api/w9-upload
+  return jsonOk({ ok:false, error:'Please use the new W9 upload form.' });
+}
+
+async function handleApiW9Upload(request, env, driver) {
   try {
-    if (driver.w9_submitted) return jsonOk({ ok:false, error:'W9 already submitted' });
-    const body = await request.json();
-    const { legal_name, business_name, tax_id_type, tax_id, address_line1, address_line2, city, state, zip, signature_data } = body;
-    if (!legal_name||!tax_id_type||!tax_id||!address_line1||!city||!state||!zip||!signature_data) return jsonOk({ ok:false, error:'All required fields must be filled' });
-    if (!env.W9_ENCRYPTION_KEY) return jsonOk({ ok:false, error:'Encryption not configured. Contact support.' });
-    const taxIdClean = tax_id.replace(/\D/g,'');
-    if (taxIdClean.length<9) return jsonOk({ ok:false, error:'Invalid Tax ID number' });
-    const tax_id_last4 = taxIdClean.slice(-4);
-    const tax_id_encrypted = await encryptTaxId(taxIdClean, env.W9_ENCRYPTION_KEY);
-    const ip_hash = await hashIp(request.headers.get('CF-Connecting-IP')||'');
-    await sbPost(env, 'w9_submissions', { driver_id:driver.id, legal_name, business_name:business_name||null, tax_id_type, tax_id_encrypted, tax_id_last4, address_line1, address_line2:address_line2||null, city, state, zip, signature_data, signed_at:new Date().toISOString(), ip_hash });
-    await sbPatch(env, 'drivers', `id=eq.${driver.id}`, { w9_submitted:true, w9_submitted_at:new Date().toISOString() });
-    await sendEmail(env, { to:driver.email, subject:'QR Perks — W9 received', html:emailW9Confirmation(driver), template_name:'w9_confirmation' });
+    if (driver.w9_submitted) return jsonOk({ ok:false, error:'W9 already on file. Contact support to replace.' });
+    const formData = await request.formData();
+    const file = formData.get('file');
+    if (!file || typeof file === 'string') return jsonOk({ ok:false, error:'No file provided' });
+    if (file.size > 10 * 1024 * 1024) return jsonOk({ ok:false, error:'File too large (max 10MB)' });
+    const nameParts = (file.name || 'w9').split('.');
+    const ext = nameParts.length > 1 ? nameParts.pop().toLowerCase() : 'pdf';
+    if (!['pdf','jpg','jpeg','png'].includes(ext)) return jsonOk({ ok:false, error:'Invalid file type. Use PDF, JPG, or PNG.' });
+    const filename = `${driver.id}_${Date.now()}.${ext}`;
+    const contentType = ext === 'pdf' ? 'application/pdf' : ext === 'png' ? 'image/png' : 'image/jpeg';
+    const fileBytes = await file.arrayBuffer();
+    const storageUrl = `${env.SUPABASE_URL}/storage/v1/object/w9-documents/${filename}`;
+    const uploadRes = await fetch(storageUrl, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${env.SUPABASE_SECRET}`, 'apikey': env.SUPABASE_SECRET, 'Content-Type': contentType, 'x-upsert': 'true' },
+      body: fileBytes,
+    });
+    if (!uploadRes.ok) {
+      const errText = await uploadRes.text().catch(()=>'');
+      console.error('W9 storage upload failed:', uploadRes.status, errText);
+      return jsonOk({ ok:false, error:'Storage upload failed. Please try again.' });
+    }
+    const docUrl = `${env.SUPABASE_URL}/storage/v1/object/w9-documents/${filename}`;
+    await sbPatch(env, 'drivers', `id=eq.${driver.id}`, { w9_submitted:true, w9_submitted_at:new Date().toISOString(), w9_document_url:docUrl });
+    sendEmail(env, { to:driver.email, subject:'QR Perks — W9 received', html:emailW9Confirmation(driver), template_name:'w9_confirmation' }).catch(()=>{});
     return jsonOk({ ok:true });
-  } catch(e) { return jsonOk({ ok:false, error:'Server error. Try again.' }); }
+  } catch(e) { console.error('handleApiW9Upload:', e.message); return jsonOk({ ok:false, error:'Server error. Try again.' }); }
 }
 
 // ─── REFERRALS ───
@@ -2276,6 +2328,8 @@ async function handleAdminDashboard(request, env) {
 
   // Real company drivers only (for assignment dropdown)
   const realDrivers = drivers.filter(d => REAL_COMPANY_IDS.includes(d.id) && d.status==='active');
+  const orgDrivers = drivers.filter(d => REAL_COMPANY_IDS.includes(d.id));
+  const testDrivers = drivers.filter(d => (d.email||'').includes('@qr-perks.com'));
 
   // Per-org data
   const orgData = (driverId, orgName) => {
@@ -2343,7 +2397,7 @@ async function handleAdminDashboard(request, env) {
 <td>${d.company_name||d.name||'—'}</td>
 <td style="color:var(--sub)">${d.email}</td>
 <td><span class="badge ${d.status==='active'?'badge-green':d.status==='pending'?'badge-yellow':'badge-red'}">${d.status}</span></td>
-<td>${d.w9_submitted?'<span style="color:var(--acc)">✓</span>':'<span style="color:#333">—</span>'}</td>
+<td>${d.w9_submitted?(d.w9_document_url?`<a href="${d.w9_document_url}" target="_blank" rel="noopener" style="color:var(--acc);font-size:12px">✓ View</a>`:'<span style="color:var(--acc)">✓</span>'):'<span style="color:#333">—</span>'}</td>
 <td style="color:var(--sub)">${d.referral_code||'—'}</td>
 <td style="text-align:right">
 ${d.status==='pending'?`<form action="/admin/approve-driver" method="POST" style="display:inline"><input type="hidden" name="driver_id" value="${d.id}"><button class="btn btn-sm" style="font-size:11px">Approve</button></form>
@@ -2376,7 +2430,8 @@ details[open] .acoll summary::after{transform:rotate(90deg)}
 
 <!-- SUMMARY STRIP -->
 <div class="stats-row" style="margin-bottom:20px">
-  <div class="astat"><div class="astat-n">${drivers.length}</div><div class="astat-l">Drivers</div></div>
+  <div class="astat"><div class="astat-n">${orgDrivers.length}</div><div class="astat-l">Organizations</div></div>
+  <div class="astat"><div class="astat-n">${drivers.length}</div><div class="astat-l">Accounts</div></div>
   <div class="astat"><div class="astat-n" style="color:#f59e0b">${pending.length}</div><div class="astat-l">Pending</div></div>
   <div class="astat"><div class="astat-n">${active.length}</div><div class="astat-l">Active</div></div>
   <div class="astat"><div class="astat-n" style="color:#f59e0b">$${(pendingPay/100).toFixed(2)}</div><div class="astat-l">Owed</div></div>
@@ -2475,7 +2530,15 @@ ${realDrivers.map(d=>`<option value="${d.id}" ${t.driver_id===d.id?'selected':''
 <summary>Drivers — <span style="color:var(--acc)">${active.length} active</span>${pending.length>0?` · <span style="color:#f59e0b">${pending.length} pending</span>`:''}</summary>
 <div class="acoll-body">
 <table><tr><th>Company</th><th>Email</th><th>Status</th><th>W9</th><th>Ref Code</th><th style="text-align:right">Actions</th></tr>
-${drivers.map(drRow).join('')||'<tr><td colspan="6" style="color:var(--sub);padding:12px 0">No drivers yet</td></tr>'}
+${drivers.filter(d=>!(d.email||"").includes("@qr-perks.com")).map(drRow).join('')||'<tr><td colspan="6" style="color:var(--sub);padding:12px 0">No drivers yet</td></tr>'}
+</table>
+${testDrivers.length>0?`
+<details style="margin-top:18px;border:1px solid var(--bdr);border-radius:12px;overflow:hidden">
+<summary style="padding:12px 16px;cursor:pointer;font-size:13px;font-weight:700;color:var(--sub);background:var(--surf)">Internal Test Accounts (${testDrivers.length})</summary>
+<div style="padding:0 16px 12px">
+<table style="margin-top:12px"><tr><th>Name</th><th>Email</th><th>Status</th><th>W9</th><th>Ref Code</th><th style="text-align:right">Actions</th></tr>
+${testDrivers.map(drRow).join("")}
+</table></div></details>`:""}
 </table>
 <div style="margin-top:20px;padding-top:18px;border-top:1px solid var(--bdr)">
   <div style="font-size:13px;font-weight:700;margin-bottom:12px;color:var(--sub);text-transform:uppercase;letter-spacing:1px">Add New Driver</div>
@@ -2494,7 +2557,7 @@ ${drivers.map(drRow).join('')||'<tr><td colspan="6" style="color:var(--sub);padd
 <!-- W9 SUBMISSIONS -->
 <details id="w9">
 <div class="acoll">
-<summary>W9 Submissions — ${w9Pending>0?`<span style="color:#f59e0b">${w9Pending} pending</span>`:`${w9s.length} submitted`}</summary>
+<summary>Tax Documents (W9) — ${w9Pending>0?`<span style="color:#f59e0b">${w9Pending} pending</span>`:`${w9s.length} submitted`}</summary>
 <div class="acoll-body">
 <table><tr><th>Date</th><th>Driver ID</th><th>Status</th><th style="text-align:right">Action</th></tr>
 ${w9s.map(w=>`<tr>
@@ -2511,7 +2574,7 @@ ${w9s.map(w=>`<tr>
 <!-- COMMISSIONS -->
 <details id="commissions">
 <div class="acoll">
-<summary>Pending Commissions — $${(pendingPay/100).toFixed(2)} owed</summary>
+<summary>Commission Ledger — $${(pendingPay/100).toFixed(2)} pending</summary>
 <div class="acoll-body">
 <div style="margin-bottom:12px">
 <form action="/admin/commissions/calculate" method="POST" style="display:inline">
@@ -2534,7 +2597,7 @@ ${commPending.map(c=>`<tr>
 <!-- AFFILIATE OFFERS -->
 <details id="offers">
 <div class="acoll">
-<summary>Affiliate Offers — ${affiliates.filter(a=>a.status==='active').length} active</summary>
+<summary>Affiliate Offer Management — ${affiliates.filter(a=>a.status==='active').length} active</summary>
 <div class="acoll-body">
 <table><tr><th>Name</th><th>Type</th><th>Order</th><th>Featured</th><th>Status</th><th style="text-align:right">Actions</th></tr>
 ${affiliates.map(a=>`<tr>
@@ -2555,7 +2618,7 @@ ${affiliates.map(a=>`<tr>
 <!-- EMAIL CAPTURES / LEADS -->
 <details id="leads">
 <div class="acoll">
-<summary>Email Captures — ${captures.filter(c=>c.status!=='unsubscribed').length} active · ${captures.length} total</summary>
+<summary>Lead Captures &amp; Email List — ${captures.filter(c=>c.status!=='unsubscribed').length} active · ${captures.length} total</summary>
 <div class="acoll-body">
 ${(()=>{
   const actv = captures.filter(c=>c.status!=='unsubscribed');
